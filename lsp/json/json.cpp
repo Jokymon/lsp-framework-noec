@@ -432,7 +432,8 @@ void stringifyImplementation(const Value& json, std::string& str, std::size_t in
 	}
 	else if(json.isObject())
 	{
-		const auto& objMap = json.object().value().keyValueMap();
+		auto obj = json.object().value();
+		const auto& objMap = obj.keyValueMap();
 
 		str += '{';
 
