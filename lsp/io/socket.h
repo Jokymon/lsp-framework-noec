@@ -10,6 +10,7 @@
 
 #ifndef LSP_SOCKET_UNSUPPORTED
 
+#include <expected>
 #include <memory>
 #include <string>
 #include <lsp/io/stream.h>
@@ -28,13 +29,13 @@ public:
 	Socket& operator=(Socket&&) noexcept;
 	~Socket() override;
 
-	[[nodiscard]] static Socket connect(const std::string& address, unsigned short port);
+	[[nodiscard]] static std::expected<Socket, Error> connect(const std::string& address, unsigned short port);
 
 	[[nodiscard]] bool isOpen() const;
 	void close();
 
-	void read(char* buffer, std::size_t size) override;
-	void write(const char* buffer, std::size_t size) override;
+	std::expected<void, Error> read(char* buffer, std::size_t size) override;
+	std::expected<void, Error> write(const char* buffer, std::size_t size) override;
 
 private:
 	friend class SocketListener;

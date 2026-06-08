@@ -1626,7 +1626,7 @@ private:
 			{
 				literalProperties.push_back({p.name, literalValue});
 				fromJson += "\tif(value." + p.name + " != " + literalValue + ")\n"
-				            "\t\tthrow json::TypeError(\"Unexpected value for literal '" + p.name + "'\");\n";
+				            "\t\treturn;\n";
 			}
 
 			if(!isInheritedLiteral)
@@ -1787,7 +1787,7 @@ private:
 		                                       "}\n\n" +
 		                                       fromJson + "\n"
 		                                       "{\n"
-		                                       "\tauto& obj = json.object();\n"
+		                                       "\tauto obj = json.object().value();\n"
 		                                       "\t" + uncapitalizeString(structureCppName) + "FromJson(obj, value);\n"
 		                                       "}\n\n";
 

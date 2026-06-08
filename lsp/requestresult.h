@@ -1,6 +1,8 @@
 #pragma once
 
+#include <expected>
 #include <future>
+#include <lsp/error.h>
 #include <lsp/jsonrpc/jsonrpc.h>
 
 namespace lsp{
@@ -12,6 +14,11 @@ using MessageId = jsonrpc::MessageId;
  */
 template<typename MessageType>
 using AsyncRequestResult = std::future<typename MessageType::Result>;
+
+template<typename MessageType>
+using RequestResult = std::expected<typename MessageType::Result, RequestError>;
+
+using NotificationResult = std::expected<void, RequestError>;
 
 using AsyncNotificationResult = std::future<void>;
 

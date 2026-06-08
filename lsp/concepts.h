@@ -20,18 +20,22 @@ concept IsCallbackResult = std::invocable<F, P> && std::same_as<std::invoke_resu
 
 template<typename M, typename F>
 concept IsRequestCallbackResult = IsCallbackResult<typename M::Result, typename M::Params, F> ||
+                                  IsCallbackResult<RequestResult<M>, typename M::Params, F> ||
                                   IsCallbackResult<AsyncRequestResult<M>, typename M::Params, F>;
 
 template<typename M, typename F>
 concept IsNoParamsRequestCallbackResult = IsNoParamsCallbackResult<typename M::Result, F> ||
+                                          IsNoParamsCallbackResult<RequestResult<M>, F> ||
                                           IsNoParamsCallbackResult<AsyncRequestResult<M>, F>;
 
 template<typename M, typename F>
 concept IsNotificationCallbackResult = IsCallbackResult<void, typename M::Params, F> ||
+                                       IsCallbackResult<NotificationResult, typename M::Params, F> ||
                                        IsCallbackResult<AsyncNotificationResult, typename M::Params, F>;
 
 template<typename M, typename F>
 concept IsNoParamsNotificationCallbackResult = IsNoParamsCallbackResult<void, F> ||
+                                               IsNoParamsCallbackResult<NotificationResult, F> ||
                                                IsNoParamsCallbackResult<AsyncNotificationResult, F>;
 
 template<typename M, typename F>

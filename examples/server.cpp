@@ -75,32 +75,31 @@ public:
 	bool isRunning()
 	{
 		return m_state.load() != State::Inactive &&
-		       (m_parentProcessId.isNull() || lsp::Process::exists(*m_parentProcessId));
+		       (m_parentProcessId.isNull()
+#ifndef LSP_PROCESS_UNSUPPORTED
+		        || lsp::Process::exists(*m_parentProcessId)
+#endif
+		       );
 	}
 
 	int run()
 	{
-		try
-		{
-			while(isRunning())
-				m_messageHandler.processIncomingMessages();
-		}
-		catch(const std::exception& e)
-		{
-			std::cerr << "ERROR: " << e.what() << std::endl;
-			return EXIT_FAILURE;
-		}
+		while(isRunning())
+			m_messageHandler.processIncomingMessages();
 
 		return EXIT_SUCCESS;
 	}
 
-	auto initialize(lsp::InitializeParams&& params) -> lsp::requests::Initialize::Result
+	auto initialize(lsp::InitializeParams&& params) -> lsp::RequestResult<lsp::requests::Initialize>
 	{
 		std::cerr << "INITIALIZE" << std::endl;
 		printMessage<lsp::requests::Initialize>(params);
 
 		if(m_state > State::Uninitialized)
-			throw lsp::RequestError(lsp::MessageError::InvalidRequest, "Already initialized");
+		{
+			return std::unexpected(
+				lsp::RequestError(lsp::MessageError::InvalidRequest, "Already initialized"));
+		}
 
 		m_state.store(State::Active);
 		m_parentProcessId = params.processId;
@@ -109,7 +108,7 @@ public:
 		 * Respond with an InitializeResult containing some basic server info and capabilities
 		 */
 
-		return {
+		return lsp::InitializeResult{
 			.capabilities = {
 				.positionEncoding = lsp::PositionEncodingKind::UTF16,
 				.textDocumentSync = lsp::TextDocumentSyncOptions{
@@ -126,46 +125,42 @@ public:
 		};
 	}
 
-	void textDocumentDidOpen(lsp::notifications::TextDocument_DidOpen::Params&&)
+	lsp::NotificationResult textDocumentDidOpen(lsp::notifications::TextDocument_DidOpen::Params&&)
 	{
-		verifyInitialized();
+		if(auto res = verifyInitialized(); !res.has_value())
+			return res;
+
 		// Do something with the openend document here...
+		return {};
 	}
 
-	auto hover(lsp::requests::TextDocument_Hover::Params&& params) -> lsp::AsyncRequestResult<lsp::requests::TextDocument_Hover>
+	auto hover(lsp::requests::TextDocument_Hover::Params&& params) -> lsp::RequestResult<lsp::requests::TextDocument_Hover>
 	{
 		printMessage<lsp::requests::TextDocument_Hover>(params);
-		verifyInitialized();
+		if(auto res = verifyInitialized(); !res.has_value())
+			return std::unexpected(res.error());
 
 		// Verify that the server actually knows the document from the request
 		if(params.textDocument.uri != lsp::DocumentUri::fromPath("foo.txt"))
 		{
-			throw lsp::RequestError(lsp::MessageError::InvalidParams,
-			                        "Unknown document: " + params.textDocument.uri.toString());
+			return std::unexpected(
+				lsp::RequestError(
+					lsp::MessageError::InvalidParams,
+					"Unknown document: " + params.textDocument.uri.toString()));
 		}
 
-		/*
-		 * Handle the request asynchronously.
-		 * It is executed in a worker thread by the message handler.
-		 * This means a deferred future can be used and it is not necessary to spawn extra threads.
-		 */
-		return std::async(std::launch::deferred,
-			[params = std::move(params)]()
-			{
-				// simulate longer running task
-				std::this_thread::sleep_for(std::chrono::seconds(2));
+		// simulate longer running task
+		std::this_thread::sleep_for(std::chrono::seconds(2));
 
-				// return the result
-				// TextDocument_Hover::Result is NullOr<Hover>
-				auto hover = lsp::Hover{
-					.contents = lsp::MarkupContent{
-						.kind  = lsp::MarkupKind::PlainText,
-						.value = "Hover test"
-					}
-				};
-				return lsp::requests::TextDocument_Hover::Result(std::move(hover));
+		// return the result
+		// TextDocument_Hover::Result is NullOr<Hover>
+		auto hover = lsp::Hover{
+			.contents = lsp::MarkupContent{
+				.kind  = lsp::MarkupKind::PlainText,
+				.value = "Hover test"
 			}
-		);
+		};
+		return lsp::requests::TextDocument_Hover::Result(std::move(hover));
 	}
 
 	auto shutdown() -> lsp::requests::Shutdown::Result
@@ -195,13 +190,21 @@ private:
 
 	std::atomic<State> m_state = State::Uninitialized;
 
-	void verifyInitialized() const
+	lsp::NotificationResult verifyInitialized() const
 	{
 		if(m_state.load() <= State::Uninitialized)
-			throw lsp::RequestError(lsp::MessageError::ServerNotInitialized, "Server not initialized");
+		{
+			return std::unexpected(
+				lsp::RequestError(lsp::MessageError::ServerNotInitialized, "Server not initialized"));
+		}
 
 		if(m_state.load() == State::Shutdown)
-			throw lsp::RequestError(lsp::MessageError::InvalidRequest, "Shutdown request received");
+		{
+			return std::unexpected(
+				lsp::RequestError(lsp::MessageError::InvalidRequest, "Shutdown request received"));
+		}
+
+		return {};
 	}
 
 	void registerCallbacks()
@@ -241,38 +244,36 @@ private:
 
 int runSocketServer(unsigned short port)
 {
-	try
+#ifdef LSP_SOCKET_UNSUPPORTED
+	(void)port;
+	std::cerr << "Socket server is not supported on this platform" << std::endl;
+	return EXIT_FAILURE;
+#else
+	std::cerr << "Waiting for incoming connections..." << std::endl;
+
+	auto socketListener = lsp::io::SocketListener(port);
+
+	while(socketListener.isReady())
 	{
-		std::cerr << "Waiting for incoming connections..." << std::endl;
+		auto socket = socketListener.listen();
 
-		auto socketListener = lsp::io::SocketListener(port);
+		if(!socket.isOpen())
+			break;
 
-		while(socketListener.isReady())
-		{
-			auto socket = socketListener.listen();
+		std::cerr << "Accepted connection" << std::endl;
 
-			if(!socket.isOpen())
-				break;
-
-			std::cerr << "Accepted connection" << std::endl;
-
-			auto thread = std::thread(
-				[socket = std::move(socket)]() mutable
-				{
-					auto server = LanguageServer(socket);
-					server.run();
-				}
-			);
-			thread.detach();
-		}
-	}
-	catch(const std::exception& e)
-	{
-		std::cerr << "ERROR: " << e.what() << std::endl;
-		return EXIT_FAILURE;
+		auto thread = std::thread(
+			[socket = std::move(socket)]() mutable
+			{
+				auto server = LanguageServer(socket);
+				server.run();
+			}
+		);
+		thread.detach();
 	}
 
 	return EXIT_SUCCESS;
+#endif
 }
 
 /*

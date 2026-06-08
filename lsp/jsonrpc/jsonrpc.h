@@ -1,5 +1,6 @@
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 #include <variant>
@@ -75,8 +76,8 @@ public:
  * Creation/Parsing/Serialization
  */
 
-[[nodiscard]] Message      messageFromJson(json::Object&& json);
-[[nodiscard]] MessageBatch messageBatchFromJson(json::Array&& json);
+[[nodiscard]] std::expected<Message, ProtocolError>      messageFromJson(json::Object&& json);
+[[nodiscard]] std::expected<MessageBatch, ProtocolError> messageBatchFromJson(json::Array&& json);
 [[nodiscard]] json::Object messageToJson(Message&& message);
 [[nodiscard]] json::Array  messageBatchToJson(MessageBatch&& batch);
 

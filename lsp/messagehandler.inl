@@ -17,18 +17,17 @@ jsonrpc::Response MessageHandler::createResponse(const MessageId& id, T&& result
 template<typename M>
 jsonrpc::Response MessageHandler::createResponseFromAsyncResult(const MessageId& id, AsyncRequestResult<M>& result)
 {
-	try
-	{
-		return createResponse(id, result.get());
-	}
-	catch(const RequestError& e)
-	{
-		return jsonrpc::createErrorResponse(id, e.code(), e.what());
-	}
-	catch(std::exception& e)
-	{
-		return jsonrpc::createErrorResponse(id, MessageError::InternalError, e.what());
-	}
+	return createResponse(id, result.get());
+}
+
+template<typename M>
+jsonrpc::Response MessageHandler::createResponseFromRequestResult(const MessageId& id, RequestResult<M>&& result)
+{
+	if(result.has_value())
+		return MessageHandler::createResponse(id, std::move(result.value()));
+
+	auto& error = result.error();
+	return jsonrpc::createErrorResponse(id, error.code(), error.what(), error.data());
 }
 
 /*
@@ -45,7 +44,13 @@ MessageHandler& MessageHandler::add(F&& handlerFunc) requires IsRequestCallback<
 		fromJson(std::move(json), params);
 		const auto& id = currentRequestId();
 
-		if constexpr(IsCallbackResult<AsyncRequestResult<M>, typename M::Params, F>)
+		if constexpr(IsCallbackResult<RequestResult<M>, typename M::Params, F>)
+		{
+			(void)this;
+			(void)allowAsync;
+			return createResponseFromRequestResult<M>(id, f(std::move(params)));
+		}
+		else if constexpr(IsCallbackResult<AsyncRequestResult<M>, typename M::Params, F>)
 		{
 			auto future = f(std::move(params));
 
@@ -81,7 +86,13 @@ MessageHandler& MessageHandler::add(F&& handlerFunc) requires IsNoParamsRequestC
 	{
 		const auto& id = currentRequestId();
 
-		if constexpr(IsNoParamsCallbackResult<AsyncRequestResult<M>, F>)
+		if constexpr(IsNoParamsCallbackResult<RequestResult<M>, F>)
+		{
+			(void)this;
+			(void)allowAsync;
+			return createResponseFromRequestResult<M>(id, f());
+		}
+		else if constexpr(IsNoParamsCallbackResult<AsyncRequestResult<M>, F>)
 		{
 			auto future = f();
 
@@ -118,7 +129,13 @@ MessageHandler& MessageHandler::add(F&& handlerFunc) requires IsNotificationCall
 		typename M::Params params;
 		fromJson(std::move(json), params);
 
-		if constexpr(IsCallbackResult<AsyncNotificationResult, typename M::Params, F>)
+		if constexpr(IsCallbackResult<NotificationResult, typename M::Params, F>)
+		{
+			(void)this;
+			(void)allowAsync;
+			(void)f(std::move(params));
+		}
+		else if constexpr(IsCallbackResult<AsyncNotificationResult, typename M::Params, F>)
 		{
 			auto future = f(std::move(params));
 
@@ -153,7 +170,13 @@ MessageHandler& MessageHandler::add(F&& handlerFunc) requires IsNoParamsNotifica
 	addHandler(M::Method,
 	[this, f = std::forward<F>(handlerFunc)](json::Value&&, bool allowAsync) -> OptionalResponse
 	{
-		if constexpr(IsNoParamsCallbackResult<AsyncNotificationResult, F>)
+		if constexpr(IsNoParamsCallbackResult<NotificationResult, F>)
+		{
+			(void)this;
+			(void)allowAsync;
+			(void)f();
+		}
+		else if constexpr(IsNoParamsCallbackResult<AsyncNotificationResult, F>)
 		{
 			auto future = f();
 
@@ -241,22 +264,16 @@ void MessageHandler::sendNotification() requires SendNoParamsNotification<M>
 template<typename T>
 void MessageHandler::FutureRequestResult<T>::setValueFromJson(json::Value&& json)
 {
-	try
-	{
-		auto value = T();
-		fromJson(std::move(json), value);
-		m_promise.set_value(std::move(value));
-	}
-	catch(const Exception& e)
-	{
-		m_promise.set_exception(std::make_exception_ptr(e));
-	}
+	auto value = T();
+	fromJson(std::move(json), value);
+	m_promise.set_value(std::move(value));
 }
 
 template<typename T>
 void MessageHandler::FutureRequestResult<T>::setError(ResponseError&& error)
 {
-	m_promise.set_exception(std::make_exception_ptr(std::move(error)));
+	(void)error;
+	m_promise.set_value(T());
 }
 
 /*
@@ -266,16 +283,9 @@ void MessageHandler::FutureRequestResult<T>::setError(ResponseError&& error)
 template<typename T, typename F, typename E>
 void MessageHandler::CallbackRequestResult<T, F, E>::setValueFromJson(json::Value&& json)
 {
-	try
-	{
-		auto value = T();
-		fromJson(std::move(json), value);
-		m_then(std::move(value));
-	}
-	catch(const json::Error& error)
-	{
-		m_error(ResponseError(MessageError::ParseError, error.what()));
-	}
+	auto value = T();
+	fromJson(std::move(json), value);
+	m_then(std::move(value));
 }
 
 template<typename T, typename F, typename E>

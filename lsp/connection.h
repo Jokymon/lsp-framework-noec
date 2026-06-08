@@ -1,5 +1,6 @@
 #pragma once
 
+#include <expected>
 #include <mutex>
 #include <string>
 #include <variant>
@@ -16,6 +17,14 @@ class Stream;
 } // namespace io
 
 /*
+ * Error returned when then connection to a client is unexpectedly lost
+ */
+class ConnectionError : public Exception{
+public:
+	using Exception::Exception;
+};
+
+/*
  * Connection between the server and a client.
  * I/O happens via lsp::io::Stream so the underlying implementation can be anything from stdio to sockets
  */
@@ -25,8 +34,8 @@ public:
 
 	Connection(io::Stream& stream);
 
-	Message readMessage();
-	void writeMessage(Message&& message);
+	std::expected<Message, ConnectionError> readMessage();
+	std::expected<void, ConnectionError> writeMessage(Message&& message);
 
 private:
 	io::Stream& m_stream;
@@ -36,19 +45,11 @@ private:
 	struct MessageHeader;
 	class InputReader;
 
-	MessageHeader readMessageHeader(InputReader& reader);
-	static void parseHeaderValue(MessageHeader& header, std::string_view line);
-	static void readNextMessageHeaderField(MessageHeader& header, InputReader& reader);
-	void writeMessageData(const std::string& content);
+	std::expected<MessageHeader, ConnectionError> readMessageHeader(InputReader& reader);
+	static std::expected<void, ConnectionError> parseHeaderValue(MessageHeader& header, std::string_view line);
+	static std::expected<void, ConnectionError> readNextMessageHeaderField(MessageHeader& header, InputReader& reader);
+	std::expected<void, ConnectionError> writeMessageData(const std::string& content);
 	std::string messageHeaderString(const MessageHeader& header);
-};
-
-/*
- * Error thrown when then connection to a client is unexpectedly lost
- */
-class ConnectionError : public Exception{
-public:
-	using Exception::Exception;
 };
 
 } // namespace lsp

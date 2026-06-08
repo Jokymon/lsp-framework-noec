@@ -83,13 +83,12 @@ struct Socket::Impl{
 		{
 				WSADATA wsaData;
 				if(WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
-					throwError("WSAStartup failed");
+					return;
 		});
 #endif
 	}
 
-	[[noreturn]]
-	static void throwError(const std::string& msg)
+	static Error makeError(const std::string& msg)
 	{
 		const auto errorCode =
 #ifdef LSP_SOCKET_POSIX
@@ -97,7 +96,7 @@ struct Socket::Impl{
 #elif defined(LSP_SOCKET_WIN32)
 		WSAGetLastError();
 #endif
-		throw Error(msg + ": " + std::to_string(errorCode));
+		return Error(msg + ": " + std::to_string(errorCode));
 	}
 
 	[[nodiscard]]
@@ -108,7 +107,7 @@ struct Socket::Impl{
 		const auto socketFd = socket(AF_INET, SOCK_STREAM, 0);
 
 		if(socketFd == InvalidSocket)
-			throwError("Failed to create socket");
+			return {};
 
 #ifdef LSP_SOCKET_POSIX
 		const int yes = 1;
@@ -125,14 +124,14 @@ struct Socket::Impl{
 		if(bind(socketFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0)
 		{
 			closeSocketHandle(socketFd);
-			throwError("Failed to bind socket address");
+			return {};
 		}
 
 		return std::make_unique<Impl>(socketFd, maxConnections);
 	}
 
 	[[nodiscard]]
-	static std::unique_ptr<Impl> connect(const std::string& address, unsigned short port)
+	static std::expected<std::unique_ptr<Impl>, Error> connect(const std::string& address, unsigned short port)
 	{
 		ensureInitialized();
 
@@ -143,7 +142,7 @@ struct Socket::Impl{
 		addrinfo* addrInfoList = nullptr;
 
 		if(auto status = getaddrinfo(address.c_str(), std::to_string(port).c_str(), &hints, &addrInfoList); status != 0)
-			throwError("getaddrinfo: " + std::to_string(status));
+			return std::unexpected(makeError("getaddrinfo: " + std::to_string(status)));
 
 		for(const auto* addr = addrInfoList; addr; addr = addr->ai_next)
 		{
@@ -163,7 +162,7 @@ struct Socket::Impl{
 
 		freeaddrinfo(addrInfoList);
 
-		throwError("Failed to connect to any resolved address");
+		return std::unexpected(makeError("Failed to connect to any resolved address"));
 	}
 
 	std::unique_ptr<Impl> listen()
@@ -171,20 +170,20 @@ struct Socket::Impl{
 		assert(m_socketFd != InvalidSocket);
 
 		if(::listen(m_socketFd, m_maxConnections) == -1)
-			throwError("Failed to listen for new socket connections");
+			return {};
 
 		const auto other = accept(m_socketFd, nullptr, nullptr);
 
 		if(other == InvalidSocket)
-			throwError("Failed to accept socket connection");
+			return {};
 
 		return std::make_unique<Impl>(other);
 	}
 
-	void read(char* buffer, std::size_t size)
+	std::expected<void, Error> read(char* buffer, std::size_t size)
 	{
 		if(size == 0)
-			return;
+			return {};
 
 		SizeType totalBytesRead = 0;
 
@@ -196,16 +195,18 @@ struct Socket::Impl{
 				continue;
 #endif
 			if(bytesRead <= 0)
-				throwError("Failed to read from socket");
+				return std::unexpected(makeError("Failed to read from socket"));
 
 			totalBytesRead += bytesRead;
 		}
+
+		return {};
 	}
 
-	void write(const char* buffer, std::size_t size)
+	std::expected<void, Error> write(const char* buffer, std::size_t size)
 	{
 		if(size == 0)
-			return;
+			return {};
 
 		SizeType totalBytesWritten = 0;
 
@@ -217,10 +218,12 @@ struct Socket::Impl{
 				continue;
 #endif
 			if(bytesWritten <= 0)
-				throwError("Failed to write to socket");
+				return std::unexpected(makeError("Failed to write from socket"));
 
 			totalBytesWritten += bytesWritten;
 		}
+
+		return {};
 	}
 };
 
@@ -237,9 +240,13 @@ Socket::Socket(std::unique_ptr<Impl> impl)
 {
 }
 
-Socket Socket::connect(const std::string& address, unsigned short port)
+std::expected<Socket, Error> Socket::connect(const std::string& address, unsigned short port)
 {
-	return Socket(Impl::connect(address, port));
+	auto impl = Impl::connect(address, port);
+	if(!impl.has_value())
+		return std::unexpected(impl.error());
+
+	return Socket(std::move(impl.value()));
 }
 
 bool Socket::isOpen() const
@@ -252,16 +259,22 @@ void Socket::close()
 	m_impl.reset();
 }
 
-void Socket::read(char* buffer, std::size_t size)
+std::expected<void, Error> Socket::read(char* buffer, std::size_t size)
 {
 	assert(m_impl);
-	m_impl->read(buffer, size);
+	if(!m_impl)
+		return std::unexpected(Error("Socket is not open"));
+
+	return m_impl->read(buffer, size);
 }
 
-void Socket::write(const char* buffer, std::size_t size)
+std::expected<void, Error> Socket::write(const char* buffer, std::size_t size)
 {
 	assert(m_impl);
-	m_impl->write(buffer, size);
+	if(!m_impl)
+		return std::unexpected(Error("Socket is not open"));
+
+	return m_impl->write(buffer, size);
 }
 
 /*
@@ -276,7 +289,7 @@ SocketListener::SocketListener(unsigned short port, unsigned short maxConnection
 Socket SocketListener::listen()
 {
 	if(!isReady())
-		throw Error("Server socket is not open for listening");
+		return Socket(nullptr);
 
 	return Socket(m_socket.m_impl->listen());
 }

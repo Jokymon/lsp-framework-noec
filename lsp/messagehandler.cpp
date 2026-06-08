@@ -23,15 +23,17 @@ MessageHandler::MessageHandler(Connection& connection, unsigned int maxResponseT
 void MessageHandler::processIncomingMessages()
 {
 	auto messageOrBatch = m_connection.readMessage();
+	if(!messageOrBatch.has_value())
+		return;
 
-	if(auto* const message = std::get_if<jsonrpc::Message>(&messageOrBatch))
+	if(auto* const message = std::get_if<jsonrpc::Message>(&messageOrBatch.value()))
 	{
 		if(auto* const request = std::get_if<jsonrpc::Request>(message))
 		{
 			auto optionalResponse = processRequest(std::move(*request), true);
 
 			if(optionalResponse.has_value())
-				m_connection.writeMessage(std::move(*optionalResponse));
+				(void)m_connection.writeMessage(std::move(*optionalResponse));
 		}
 		else
 		{
@@ -40,7 +42,7 @@ void MessageHandler::processIncomingMessages()
 	}
 	else
 	{
-		auto& batch         = std::get<jsonrpc::MessageBatch>(messageOrBatch);
+		auto& batch         = std::get<jsonrpc::MessageBatch>(messageOrBatch.value());
 		auto  responseBatch = jsonrpc::MessageBatch();
 
 		for(auto& msg : batch)
@@ -59,7 +61,7 @@ void MessageHandler::processIncomingMessages()
 		}
 
 		if(!responseBatch.empty())
-			m_connection.writeMessage(std::move(responseBatch));
+			(void)m_connection.writeMessage(std::move(responseBatch));
 	}
 }
 
@@ -67,7 +69,10 @@ const MessageId& MessageHandler::currentRequestId()
 {
 	assert(t_currentRequestId);
 	if(!t_currentRequestId)
-		throw std::logic_error("MessageHandler::currentRequestId called outside of a request context");
+	{
+		static const MessageId NullMessageId = json::Null();
+		return NullMessageId;
+	}
 
 	return *t_currentRequestId;
 }
@@ -99,44 +104,12 @@ MessageHandler::OptionalResponse MessageHandler::processRequest(jsonrpc::Request
 			t_currentRequestId = &NullMessageId;
 		}
 
-		try
-		{
-			lock.unlock();
+		lock.unlock();
 
-			// Call handler for the method type and return optional response
-			response = handlerIt->second(
-				request.params.has_value() ? std::move(*request.params) : json::Null{},
-				allowAsync);
-		}
-		catch(const RequestError& e)
-		{
-			if(!request.isNotification())
-			{
-				response = jsonrpc::createErrorResponse(
-					*request.id, e.code(), e.what(), e.data());
-			}
-		}
-		catch(const json::TypeError& e)
-		{
-			if(!request.isNotification())
-			{
-				response = jsonrpc::createErrorResponse(
-					*request.id, MessageError::InvalidParams, e.what());
-			}
-		}
-		catch(const std::exception& e)
-		{
-			if(!request.isNotification())
-			{
-				response = jsonrpc::createErrorResponse(
-					*request.id, MessageError::InternalError, e.what());
-			}
-		}
-		catch(...)
-		{
-			t_currentRequestId = nullptr;
-			throw;
-		}
+		// Call handler for the method type and return optional response
+		response = handlerIt->second(
+			request.params.has_value() ? std::move(*request.params) : json::Null{},
+			allowAsync);
 
 		t_currentRequestId = nullptr;
 	}
@@ -166,26 +139,18 @@ void MessageHandler::processResponse(jsonrpc::Response&& response)
 	if(!result) // If there's no result it means a response was received without a request which makes no sense but just ignore it...
 		return;
 
-	try
-	{
-		assert(!t_currentRequestId);
-		t_currentRequestId = &response.id;
+	assert(!t_currentRequestId);
+	t_currentRequestId = &response.id;
 
-		if(response.result.has_value())
-		{
-			result->setValueFromJson(std::move(*response.result));
-		}
-		else // Error response received.
-		{
-			assert(response.error.has_value());
-			auto& error = *response.error;
-			result->setError(ResponseError(error.code, std::move(error.message), std::move(error.data)));
-		}
-	}
-	catch(...)
+	if(response.result.has_value())
 	{
-		t_currentRequestId = nullptr;
-		throw;
+		result->setValueFromJson(std::move(*response.result));
+	}
+	else // Error response received.
+	{
+		assert(response.error.has_value());
+		auto& error = *response.error;
+		result->setError(ResponseError(error.code, std::move(error.message), std::move(error.data)));
 	}
 
 	t_currentRequestId = nullptr;
@@ -251,7 +216,7 @@ MessageHandler& MessageHandler::add(std::string_view method, GenericAsyncMessage
 
 void MessageHandler::sendResponse(jsonrpc::Response&& response)
 {
-	m_connection.writeMessage(std::move(response));
+	(void)m_connection.writeMessage(std::move(response));
 }
 
 MessageId MessageHandler::sendRequest(std::string_view method, RequestResultPtr result, std::optional<json::Value>&& params)
@@ -260,7 +225,7 @@ MessageId MessageHandler::sendRequest(std::string_view method, RequestResultPtr 
 	const auto messageId = nextUniqueRequestId();
 	m_pendingRequests[messageId] = std::move(result);
 	auto request = jsonrpc::createRequest(messageId, method, std::move(params));
-	m_connection.writeMessage(std::move(request));
+	(void)m_connection.writeMessage(std::move(request));
 	return messageId;
 }
 
@@ -287,7 +252,7 @@ FutureResponse<MessageHandler::GenericMessage> MessageHandler::sendRequest(std::
 void MessageHandler::sendNotification(std::string_view method, std::optional<json::Value>&& params)
 {
 	auto notification = jsonrpc::createNotification(method, std::move(params));
-	m_connection.writeMessage(std::move(notification));
+	(void)m_connection.writeMessage(std::move(notification));
 }
 
 } // namespace lsp

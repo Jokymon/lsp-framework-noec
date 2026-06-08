@@ -124,6 +124,9 @@ private:
 	template<typename M>
 	static jsonrpc::Response createResponseFromAsyncResult(const MessageId& id, AsyncRequestResult<M>& result);
 
+	template<typename M>
+	static jsonrpc::Response createResponseFromRequestResult(const MessageId& id, RequestResult<M>&& result);
+
 	OptionalResponse processRequest(jsonrpc::Request&& request, bool allowAsync);
 	void processResponse(jsonrpc::Response&& response);
 	void addHandler(std::string_view method, HandlerWrapper&& handlerFunc);

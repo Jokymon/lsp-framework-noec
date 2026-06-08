@@ -65,22 +65,15 @@ private:
 		void execute() override
 		{
 			std::apply([this](Args&&... args){
-				try
+				if constexpr(std::same_as<ResultType, void>)
 				{
-					if constexpr(std::same_as<ResultType, void>)
-					{
-						std::invoke(callback, std::forward<Args>(args)...);
-						promise.set_value();
-					}
-					else
-					{
-						auto result = std::invoke(callback, std::forward<Args>(args)...);
-						promise.set_value(std::move(result));
-					}
+					std::invoke(callback, std::forward<Args>(args)...);
+					promise.set_value();
 				}
-				catch(...)
+				else
 				{
-					promise.set_exception(std::current_exception());
+					auto result = std::invoke(callback, std::forward<Args>(args)...);
+					promise.set_value(std::move(result));
 				}
 			}, std::move(callbackArgs));
 		}

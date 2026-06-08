@@ -1,5 +1,7 @@
 #include <atomic>
 #include <charconv>
+#include <expected>
+#include <future>
 #include <iostream>
 #include <thread>
 #include <lsp/connection.h>
@@ -100,7 +102,9 @@ public:
 		 * Setup initialize params with client capabilities
 		 */
 		auto initializeParams = lsp::requests::Initialize::Params();
+#ifndef LSP_PROCESS_UNSUPPORTED
 		initializeParams.processId    = lsp::Process::currentProcessId(),
+#endif
 		initializeParams.rootUri      = lsp::DocumentUri::fromPath(".");
 		initializeParams.capabilities = {
 			.textDocument = lsp::TextDocumentClientCapabilities{
@@ -113,12 +117,29 @@ public:
 		/*
 		 * Send initialize request to the server and wait for the response
 		 */
-		auto initializeRequest =
-			m_messageHandler.sendRequest<lsp::requests::Initialize>(std::move(initializeParams));
-		auto initializeResult = initializeRequest.result.get();
+		auto initializePromise = std::promise<std::expected<lsp::requests::Initialize::Result, lsp::ResponseError>>();
+		auto initializeFuture = initializePromise.get_future();
 
-		printResponse<lsp::requests::Initialize>(initializeResult);
-		m_serverCapabilities = std::move(initializeResult.capabilities);
+		m_messageHandler.sendRequest<lsp::requests::Initialize>(
+			std::move(initializeParams),
+			[&initializePromise](lsp::requests::Initialize::Result&& result)
+			{
+				initializePromise.set_value(std::move(result));
+			},
+			[&initializePromise](const lsp::ResponseError& error)
+			{
+				initializePromise.set_value(std::unexpected(error));
+			});
+
+		auto initializeResult = initializeFuture.get();
+		if(!initializeResult.has_value())
+		{
+			printError(initializeResult.error());
+			return;
+		}
+
+		printResponse<lsp::requests::Initialize>(initializeResult.value());
+		m_serverCapabilities = std::move(initializeResult.value().capabilities);
 
 		/*
 		 * Send the 'initialized' notification to let the server know that the client is ready
@@ -168,26 +189,34 @@ public:
 
 	lsp::requests::TextDocument_Hover::Result hover(lsp::DocumentUri uri, const lsp::Position& position)
 	{
-		try
+		auto hoverParams             = lsp::requests::TextDocument_Hover::Params();
+		hoverParams.textDocument.uri = std::move(uri);
+		hoverParams.position         = position;
+
+		auto hoverPromise = std::promise<std::expected<lsp::requests::TextDocument_Hover::Result, lsp::ResponseError>>();
+		auto hoverFuture = hoverPromise.get_future();
+
+		m_messageHandler.sendRequest<lsp::requests::TextDocument_Hover>(
+			std::move(hoverParams),
+			[&hoverPromise](lsp::requests::TextDocument_Hover::Result&& result)
+			{
+				hoverPromise.set_value(std::move(result));
+			},
+			[&hoverPromise](const lsp::ResponseError& error)
+			{
+				hoverPromise.set_value(std::unexpected(error));
+			});
+
+		const auto hoverResult = hoverFuture.get();
+
+		if(!hoverResult.has_value())
 		{
-			auto hoverParams             = lsp::requests::TextDocument_Hover::Params();
-			hoverParams.textDocument.uri = std::move(uri);
-			hoverParams.position         = position;
-
-			auto hoverRequest =
-				m_messageHandler.sendRequest<lsp::requests::TextDocument_Hover>(std::move(hoverParams));
-
-			const auto hoverResult = hoverRequest.result.get();
-
-			printResponse<lsp::requests::TextDocument_Hover>(hoverResult);
-
-			return hoverResult;
-		}
-		catch(const lsp::ResponseError& error)
-		{
-			printError(error);
+			printError(hoverResult.error());
 			return {};
 		}
+
+		printResponse<lsp::requests::TextDocument_Hover>(hoverResult.value());
+		return hoverResult.value();
 	}
 
 private:
@@ -199,16 +228,8 @@ private:
 
 	void messageLoop()
 	{
-		try
-		{
-			while(isRunning())
-				m_messageHandler.processIncomingMessages();
-		}
-		catch(const std::exception& e)
-		{
-			m_running.store(false);
-			std::cerr << "ERROR: " << e.what() << std::endl;
-		}
+		while(isRunning())
+			m_messageHandler.processIncomingMessages();
 	}
 };
 
@@ -308,33 +329,40 @@ Args parseArgs(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
-	try
-	{
-		const auto args = parseArgs(argc, argv);
+	const auto args = parseArgs(argc, argv);
 
-		if(!args.executable.empty())
+	if(!args.executable.empty())
+	{
+#ifdef LSP_PROCESS_UNSUPPORTED
+		std::cerr << "Launching a language server process is not supported on this platform" << std::endl;
+		return EXIT_FAILURE;
+#else
+		std::cerr << "Launching language server executable '" << args.executable << '\'' << std::endl;
+		auto proc = lsp::Process(args.executable, args.executableArgs);
+		runLanguageClient(proc.stdIO());
+#endif
+	}
+	else if(args.port.has_value())
+	{
+#ifdef LSP_SOCKET_UNSUPPORTED
+		std::cerr << "Socket connections are not supported on this platform" << std::endl;
+		return EXIT_FAILURE;
+#else
+		std::cerr << "Connecting to language server on port " << *args.port << std::endl;
+		auto socket = lsp::io::Socket::connect(lsp::io::Socket::Localhost, *args.port);
+		if(!socket.has_value())
 		{
-			std::cerr << "Launching language server executable '" << args.executable << '\'' << std::endl;
-			auto proc = lsp::Process(args.executable, args.executableArgs);
-			runLanguageClient(proc.stdIO());
-		}
-		else if(args.port.has_value())
-		{
-			std::cerr << "Connecting to language server on port " << *args.port << std::endl;
-			auto socket = lsp::io::Socket::connect(lsp::io::Socket::Localhost, *args.port);
-			runLanguageClient(socket);
-		}
-		else
-		{
-			std::cerr << R"(Available arguments:
-    --port=<portnum>          Connect to a language server via socket on port <portnum>
-    --exe=<executable> <args> Launch language server <executable> and connect to it via stdio)" << std::endl;
+			std::cerr << "ERROR: " << socket.error().what() << std::endl;
 			return EXIT_FAILURE;
 		}
+		runLanguageClient(socket.value());
+#endif
 	}
-	catch(const std::exception& e)
+	else
 	{
-		std::cerr << "ERROR: " << e.what() << std::endl;
+		std::cerr << R"(Available arguments:
+    --port=<portnum>          Connect to a language server via socket on port <portnum>
+    --exe=<executable> <args> Launch language server <executable> and connect to it via stdio)" << std::endl;
 		return EXIT_FAILURE;
 	}
 

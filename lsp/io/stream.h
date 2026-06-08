@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <expected>
 #include <lsp/exception.h>
 
 namespace lsp::io{
@@ -25,8 +26,8 @@ public:
 	static constexpr auto Eof = static_cast<char>(0xff);
 
 	virtual ~Stream() = default;
-	virtual void read(char* buffer, std::size_t size) = 0;
-	virtual void write(const char* buffer, std::size_t size) = 0;
+	virtual std::expected<void, Error> read(char* buffer, std::size_t size) = 0;
+	virtual std::expected<void, Error> write(const char* buffer, std::size_t size) = 0;
 
 protected:
 	Stream() = default;

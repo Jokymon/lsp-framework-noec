@@ -6,127 +6,154 @@ namespace{
 
 constexpr std::string_view ProtocolVersion{"2.0"};
 
-void verifyProtocolVersion(const json::Object& json)
+std::expected<void, ProtocolError> verifyProtocolVersion(const json::Object& json)
 {
 	if(!json.contains("jsonrpc"))
-		throw ProtocolError{"jsonrpc property is missing"};
+		return std::unexpected(ProtocolError{"jsonrpc property is missing"});
 
-	const auto& jsonrpc = json.get("jsonrpc");
+	const auto jsonrpc = json.get("jsonrpc").value();
 
 	if(!jsonrpc.isString())
-		throw ProtocolError{"jsonrpc property expected to be a string"};
+		return std::unexpected(ProtocolError{"jsonrpc property expected to be a string"});
 
-	if(jsonrpc.string() != ProtocolVersion)
-		throw ProtocolError{"Invalid or unsupported jsonrpc version"};
+	if(jsonrpc.string().value() != ProtocolVersion)
+		return std::unexpected(ProtocolError{"Invalid or unsupported jsonrpc version"});
+
+	return {};
 }
 
-MessageId messageIdFromJson(json::Value& json)
+std::expected<MessageId, ProtocolError> messageIdFromJson(json::Value json)
 {
 	if(json.isString())
-		return std::move(json.string());
+		return std::move(json.string().value());
 
 	if(json.isNumber())
-		return static_cast<json::Integer>(json.number());
+		return static_cast<json::Integer>(json.number().value());
 
 	if(json.isNull())
 		return nullptr;
 
-	throw ProtocolError{"Request id type must be string, number or null"};
+	return std::unexpected(ProtocolError{"Request id type must be string, number or null"});
 }
 
-Request requestFromJson(json::Object& json)
+std::expected<Request, ProtocolError> requestFromJson(json::Object json)
 {
-	verifyProtocolVersion(json);
+	if(auto res = verifyProtocolVersion(json); !res.has_value())
+		return std::unexpected(res.error());
 
 	Request request;
-	request.method = std::move(json.get("method").string());
+	request.method = std::move(json.get("method").value().string().value());
 
 	if(json.contains("id"))
-		request.id = messageIdFromJson(json.get("id"));
+	{
+		auto id = messageIdFromJson(json.get("id").value());
+		if(!id.has_value())
+			return std::unexpected(id.error());
+		request.id = std::move(id.value());
+	}
 
 	if(json.contains("params"))
 	{
-		auto& params = json.get("params");
+		auto params = json.get("params").value();
 
 		if(params.isObject())
-			request.params = std::move(params.object());
+			request.params = std::move(params.object().value());
 		else if(params.isArray())
-			request.params = std::move(params.array());
+			request.params = std::move(params.array().value());
 		else if(!params.isNull()) // Be lenient and allow null params even though it is not allowed by jsonrpc 2.0
-			throw ProtocolError{"Params type must be object or array"};
+			return std::unexpected(ProtocolError{"Params type must be object or array"});
 	}
 
 	return request;
 }
 
-Response responseFromJson(json::Object& json)
+std::expected<Response, ProtocolError> responseFromJson(json::Object json)
 {
-	verifyProtocolVersion(json);
+	if(auto res = verifyProtocolVersion(json); !res.has_value())
+		return std::unexpected(res.error());
 
 	Response response;
 
 	if(json.contains("id"))
-		response.id = messageIdFromJson(json.get("id"));
+	{
+		auto id = messageIdFromJson(json.get("id").value());
+		if(!id.has_value())
+			return std::unexpected(id.error());
+		response.id = std::move(id.value());
+	}
 
 	if(json.contains("result"))
-		response.result = std::move(json.get("result"));
+		response.result = std::move(json.get("result").value());
 
 	if(json.contains("error"))
 	{
-		auto& error         = json.get("error");
-		auto& errorObj      = error.object();
+		auto  error         = json.get("error").value();
+		auto  errorObj      = error.object().value();
 		auto& responseError = response.error.emplace();
 
 		if(!errorObj.contains("code"))
-			throw ProtocolError{"Response error is missing the error code"};
+			return std::unexpected(ProtocolError{"Response error is missing the error code"});
 
-		const auto& errorCode = errorObj.get("code");
+		const auto errorCode = errorObj.get("code").value();
 
 		if(!errorCode.isNumber())
-			throw ProtocolError{"Response error code must be a number"};
+			return std::unexpected(ProtocolError{"Response error code must be a number"});
 
-		responseError.code = static_cast<json::Integer>(errorCode.number());
+		responseError.code = static_cast<json::Integer>(errorCode.number().value());
 
 		if(!errorObj.contains("message"))
-			throw ProtocolError{"Response error is missing the error message"};
+			return std::unexpected(ProtocolError{"Response error is missing the error message"});
 
-		auto& errorMessage = errorObj.get("message");
+		auto errorMessage = errorObj.get("message").value();
 
 		if(!errorMessage.isString())
-			throw ProtocolError{"Response error message must be a string"};
+			return std::unexpected(ProtocolError{"Response error message must be a string"});
 
-		responseError.message = std::move(errorMessage.string());
+		responseError.message = std::move(errorMessage.string().value());
 
 		if(errorObj.contains("data"))
-			responseError.data = errorObj.get("data");
+			responseError.data = errorObj.get("data").value();
 	}
 
 	if((response.result.has_value() && response.error.has_value()) || (!response.result.has_value() && !response.error.has_value()))
-		throw ProtocolError{"Response must have either 'result' or 'error'"};
+		return std::unexpected(ProtocolError{"Response must have either 'result' or 'error"});
 
 	return response;
 }
 
 } // namespace
 
-Message messageFromJson(json::Object&& json)
+std::expected<Message, ProtocolError> messageFromJson(json::Object&& json)
 {
 	if(json.contains("method"))
-		return requestFromJson(json);
+	{
+		auto request = requestFromJson(std::move(json));
+		if(!request.has_value())
+			return std::unexpected(request.error());
+		return std::move(request.value());
+	}
 
-	return responseFromJson(json);
+	auto response = responseFromJson(std::move(json));
+	if(!response.has_value())
+		return std::unexpected(response.error());
+	return std::move(response.value());
 }
 
-MessageBatch messageBatchFromJson(json::Array&& json)
+std::expected<MessageBatch, ProtocolError> messageBatchFromJson(json::Array&& json)
 {
 	if(json.empty())
-		throw ProtocolError{"Message batch must not be empty"};
+		return std::unexpected(ProtocolError{"Message batch must not be empty"});
 
 	auto batch = MessageBatch();
 	batch.reserve(json.size());
 
 	for(auto& jsonMessage : json)
-		batch.push_back(messageFromJson(std::move(jsonMessage.object())));
+	{
+		auto message = messageFromJson(std::move(jsonMessage.object().value()));
+		if(!message.has_value())
+			return std::unexpected(message.error());
+		batch.push_back(std::move(message.value()));
+	}
 
 	return batch;
 }

@@ -67,10 +67,10 @@ bool equalCaseInsensitive(std::string_view lhs, std::string_view rhs)
 		});
 }
 
-void verifyContentType(std::string_view contentType)
+std::expected<void, ConnectionError> verifyContentType(std::string_view contentType)
 {
 	if(!contentType.starts_with("application/vscode-jsonrpc"))
-		throw ConnectionError{"Protocol: Unsupported or invalid content type: " + std::string(contentType)};
+		return std::unexpected(ConnectionError{"Protocol: Unsupported or invalid content type: " + std::string(contentType)});
 
 	constexpr std::string_view charsetKey{"charset="};
 	if(const auto idx = contentType.find(charsetKey); idx != std::string_view::npos)
@@ -79,8 +79,10 @@ void verifyContentType(std::string_view contentType)
 		charset = trimWhitespace(charset.substr(0, charset.find(';')));
 
 		if(charset != "utf-8" && charset != "utf8")
-			throw ConnectionError{"Protocol: Unsupported or invalid character encoding: " + std::string{charset}};
+			return std::unexpected(ConnectionError{"Protocol: Unsupported or invalid character encoding: " + std::string{charset}});
 	}
+
+	return {};
 }
 
 } // namespace
@@ -119,7 +121,7 @@ public:
 		return c;
 	}
 
-	void read(char* buffer, std::size_t size)
+	std::expected<void, ConnectionError> read(char* buffer, std::size_t size)
 	{
 		if(size > 0)
 		{
@@ -131,8 +133,12 @@ public:
 				--size;
 			}
 
-			m_stream.read(buffer, size);
+			auto res = m_stream.read(buffer, size);
+			if(!res.has_value())
+				return std::unexpected(ConnectionError(res.error().what()));
 		}
+
+		return {};
 	}
 
 private:
@@ -154,104 +160,102 @@ Connection::Connection(io::Stream& stream)
 {
 }
 
-Connection::Message Connection::readMessage()
+std::expected<Connection::Message, ConnectionError> Connection::readMessage()
 {
-	try
+	auto readLock = std::unique_lock(m_readMutex);
+	auto reader   = InputReader(m_stream);
+
+	if(reader.peek() == io::Stream::Eof)
+		return std::unexpected(ConnectionError{"Connection lost"});
+
+	auto header = readMessageHeader(reader);
+	if(!header.has_value())
+		return std::unexpected(header.error());
+
+	std::string content;
+	content.resize(header.value().contentLength);
+	if(auto res = reader.read(&content[0], header.value().contentLength); !res.has_value())
+		return std::unexpected(res.error());
+
+	readLock.unlock();
+
+	// Verify only after reading the entire message so no partially unread message is left in the stream
+	if(auto res = verifyContentType(header.value().contentType); !res.has_value())
+		return std::unexpected(res.error());
+
+	auto parseResult = json::parse(content);
+	if(!parseResult.has_value())
 	{
-		auto readLock = std::unique_lock(m_readMutex);
-		auto reader   = InputReader(m_stream);
+		(void)writeMessage(jsonrpc::createErrorResponse(json::Null(), MessageError::ParseError, parseResult.error().what()));
+		return std::unexpected(ConnectionError(parseResult.error().what()));
+	}
 
-		if(reader.peek() == io::Stream::Eof)
-			throw ConnectionError{"Connection lost"};
-
-		const auto header = readMessageHeader(reader);
-
-		std::string content;
-		content.resize(header.contentLength);
-		reader.read(&content[0], header.contentLength);
-
-		readLock.unlock();
-
-		// Verify only after reading the entire message so no partially unread message is left in the stream
-		verifyContentType(header.contentType);
-
-		auto json = json::parse(content);
+	auto json = parseResult.value();
 #if LSP_MESSAGE_DEBUG_LOG
-		debugLogMessageJson("incoming", json);
+	debugLogMessageJson("incoming", json);
 #endif
 
-		if(json.isObject())
-			return jsonrpc::messageFromJson(std::move(json.object()));
+	if(json.isObject())
+	{
+		auto message = jsonrpc::messageFromJson(std::move(json.object().value()));
+		if(!message.has_value())
+		{
+			(void)writeMessage(jsonrpc::createErrorResponse(json::Null(), MessageError::InvalidRequest, message.error().what()));
+			return std::unexpected(ConnectionError(message.error().what()));
+		}
 
-		if(!json.isArray())
-			throw jsonrpc::ProtocolError("Message must be a json object or array");
+		return std::move(message.value());
+	}
 
-		return jsonrpc::messageBatchFromJson(std::move(json.array()));
-	}
-	catch(const json::ParseError& e)
+	if(!json.isArray())
 	{
-		writeMessage(jsonrpc::createErrorResponse(json::Null(), MessageError::ParseError, e.what()));
-		throw; // FIXME: This shouldn't abort the connection
+		const auto error = ConnectionError("Message must be a json object or array");
+		(void)writeMessage(jsonrpc::createErrorResponse(json::Null(), MessageError::InvalidRequest, error.what()));
+		return std::unexpected(error);
 	}
-	catch(const jsonrpc::ProtocolError& e)
+
+	auto batch = jsonrpc::messageBatchFromJson(std::move(json.array().value()));
+	if(!batch.has_value())
 	{
-		writeMessage(jsonrpc::createErrorResponse(json::Null(), MessageError::InvalidRequest, e.what()));
-		throw; // FIXME: This shouldn't abort the connection
+		(void)writeMessage(jsonrpc::createErrorResponse(json::Null(), MessageError::InvalidRequest, batch.error().what()));
+		return std::unexpected(ConnectionError(batch.error().what()));
 	}
-	catch(const ConnectionError&)
-	{
-		throw;
-	}
-	catch(const std::exception& e)
-	{
-		throw ConnectionError{e.what()};
-	}
-	catch(...)
-	{
-		throw ConnectionError{"Unknown error"};
-	}
+
+	return std::move(batch.value());
 }
 
-void Connection::writeMessage(Message&& message)
+std::expected<void, ConnectionError> Connection::writeMessage(Message&& message)
 {
-	try
-	{
-		auto json = json::Value();
+	auto json = json::Value();
 
-		if(auto* const msg = std::get_if<jsonrpc::Message>(&message))
-			json = jsonrpc::messageToJson(std::move(*msg));
-		else
-			json = jsonrpc::messageBatchToJson(std::move(std::get<jsonrpc::MessageBatch>(message)));
+	if(auto* const msg = std::get_if<jsonrpc::Message>(&message))
+		json = jsonrpc::messageToJson(std::move(*msg));
+	else
+		json = jsonrpc::messageBatchToJson(std::move(std::get<jsonrpc::MessageBatch>(message)));
 
 #if LSP_MESSAGE_DEBUG_LOG
-		debugLogMessageJson("outgoing", json);
+	debugLogMessageJson("outgoing", json);
 #endif
-		writeMessageData(json::stringify(json));
-	}
-	catch(const std::exception& e)
-	{
-		throw ConnectionError{e.what()};
-	}
-	catch(...)
-	{
-		throw ConnectionError{"Unknown error"};
-	}
+	return writeMessageData(json::stringify(json));
 }
 
-Connection::MessageHeader Connection::readMessageHeader(InputReader& reader)
+std::expected<Connection::MessageHeader, ConnectionError> Connection::readMessageHeader(InputReader& reader)
 {
 	MessageHeader header;
 
 	while(reader.peek() != '\r')
-		readNextMessageHeaderField(header, reader);
+	{
+		if(auto res = readNextMessageHeaderField(header, reader); !res.has_value())
+			return std::unexpected(res.error());
+	}
 
 	if(reader.get() != '\r' || reader.get() != '\n')
-		throw ConnectionError("Protocol: Expected header to be terminated by '\\r\\n'");
+		return std::unexpected(ConnectionError("Protocol: Expected header to be terminated by '\\r\\n'"));
 
 	return header;
 }
 
-void Connection::parseHeaderValue(MessageHeader& header, std::string_view line)
+std::expected<void, ConnectionError> Connection::parseHeaderValue(MessageHeader& header, std::string_view line)
 {
 	const auto separatorIdx = line.find(':');
 
@@ -267,19 +271,21 @@ void Connection::parseHeaderValue(MessageHeader& header, std::string_view line)
 			const auto [ptr, ec] = std::from_chars(first, last, header.contentLength);
 
 			if(ec != std::errc{} || ptr != last)
-				throw ConnectionError("Protocol: Invalid value for Content-Length header field");
+				return std::unexpected(ConnectionError("Protocol: Invalid value for Content-Length header field"));
 		}
 		else if(equalCaseInsensitive(key, "Content-Type"))
 		{
 			header.contentType = std::string{value.data(), value.size()};
 		}
 	}
+
+	return {};
 }
 
-void Connection::readNextMessageHeaderField(MessageHeader& header, InputReader& reader)
+std::expected<void, ConnectionError> Connection::readNextMessageHeaderField(MessageHeader& header, InputReader& reader)
 {
 	if(reader.peek() == std::char_traits<char>::eof())
-		throw ConnectionError{"Connection lost"};
+		return std::unexpected(ConnectionError{"Connection lost"});
 
 	std::string lineData;
 
@@ -288,23 +294,30 @@ void Connection::readNextMessageHeaderField(MessageHeader& header, InputReader& 
 		const auto c = reader.get();
 
 		if(c == '\n')
-			throw ConnectionError("Protocol: Unexpected '\\n' in header field, expected '\\r\\n'");
+			return std::unexpected(ConnectionError("Protocol: Unexpected '\\n' in header field, expected '\\r\\n'"));
 
 		lineData.push_back(c);
 	}
 
-	parseHeaderValue(header, lineData);
+	if(auto res = parseHeaderValue(header, lineData); !res.has_value())
+		return std::unexpected(res.error());
 
 	if(reader.get() != '\r' || reader.get() != '\n')
-		throw ConnectionError("Protocol: Expected header field to be terminated by '\\r\\n'");
+		return std::unexpected(ConnectionError("Protocol: Expected header field to be terminated by '\\r\\n'"));
+
+	return {};
 }
 
-void Connection::writeMessageData(const std::string& content)
+std::expected<void, ConnectionError> Connection::writeMessageData(const std::string& content)
 {
 	std::lock_guard lock{m_writeMutex};
 	MessageHeader header{content.size()};
 	const auto messageStr = messageHeaderString(header) + content;
-	m_stream.write(messageStr.data(), messageStr.size());
+	auto res = m_stream.write(messageStr.data(), messageStr.size());
+	if(!res.has_value())
+		return std::unexpected(ConnectionError(res.error().what()));
+
+	return {};
 }
 
 std::string Connection::messageHeaderString(const MessageHeader& header)

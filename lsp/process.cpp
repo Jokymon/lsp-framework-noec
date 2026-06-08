@@ -32,14 +32,14 @@ struct Process::Impl final : public io::Stream{
 		int errPipe[2]; // Used to inform parent about exec errors
 
 		if(pipe(inPipe) == -1)
-			throw ProcessError(strerror(errno));
+			return;
 
 		if(pipe(outPipe) == -1)
 		{
 			const auto error = errno;
 			close(inPipe[0]);
 			close(inPipe[1]);
-			throw ProcessError(strerror(error));
+			return;
 		}
 
 		if(pipe(errPipe) == -1)
@@ -49,7 +49,7 @@ struct Process::Impl final : public io::Stream{
 			close(inPipe[1]);
 			close(outPipe[0]);
 			close(outPipe[1]);
-			throw ProcessError(strerror(error));
+			return;
 		}
 
 		auto argList = std::vector<char*>({const_cast<char*>(executable.c_str())});
@@ -72,7 +72,7 @@ struct Process::Impl final : public io::Stream{
 			close(inPipe[1]);
 			close(outPipe[0]);
 			close(outPipe[1]);
-			throw ProcessError(strerror(errno));
+			return;
 		}
 
 		if(m_pid == 0) // Child process
@@ -111,7 +111,7 @@ struct Process::Impl final : public io::Stream{
 				close(inPipe[1]);
 				close(outPipe[0]);
 				waitpid(m_pid, nullptr, 0);
-				throw ProcessError(strerror(error));
+				return;
 			}
 
 			m_stdinWrite = inPipe[1];
@@ -201,7 +201,7 @@ struct Process::Impl final : public io::Stream{
 		return id > 0 && kill(static_cast<pid_t>(id), 0) == 0;
 	}
 
-	void read(char* buffer, std::size_t size) override
+	std::expected<void, io::Error> read(char* buffer, std::size_t size) override
 	{
 		std::size_t totalBytesRead = 0;
 
@@ -214,14 +214,16 @@ struct Process::Impl final : public io::Stream{
 				if(errno == EINTR)
 					continue;
 
-				throw io::Error(std::string("Failed to read from process stdout: ") + strerror(errno));
+				return std::unexpected(io::Error(std::string("Failed to read from process stdout: ") + strerror(errno)));
 			}
 
 			totalBytesRead += static_cast<std::size_t>(bytesRead);
 		}
+
+		return {};
 	}
 
-	void write(const char* buffer, std::size_t size) override
+	std::expected<void, io::Error> write(const char* buffer, std::size_t size) override
 	{
 		std::size_t totalBytesWritten = 0;
 
@@ -234,11 +236,13 @@ struct Process::Impl final : public io::Stream{
 				if(errno == EINTR)
 					continue;
 
-				throw io::Error(std::string("Failed to write to process stdin: ") + strerror(errno));
+				return std::unexpected(io::Error(std::string("Failed to write to process stdin: ") + strerror(errno)));
 			}
 
 			totalBytesWritten += static_cast<std::size_t>(bytesWritten);
 		}
+
+		return {};
 	}
 #elif defined(LSP_PROCESS_WIN32)
 	HANDLE              m_stdinRead    = nullptr;
@@ -302,7 +306,7 @@ struct Process::Impl final : public io::Stream{
 		const auto len = MultiByteToWideChar(CP_UTF8, 0, cmdLine.data(), static_cast<int>(cmdLine.size()), wCmdLine.data(), static_cast<int>(wCmdLine.size()));
 
 		if(len < 0)
-			throw ProcessError("Failed to convert process command line");
+			return {};
 
 		wCmdLine.resize(static_cast<std::size_t>(len));
 
@@ -316,7 +320,7 @@ struct Process::Impl final : public io::Stream{
 		securityAttributes.bInheritHandle = TRUE;
 
 		if(!CreatePipe(&m_stdinRead, &m_stdinWrite, &securityAttributes, 0))
-			throw ProcessError("Failed to create stdin pipe");
+			return;
 
 		SetHandleInformation(m_stdinWrite, HANDLE_FLAG_INHERIT, 0);
 
@@ -325,7 +329,7 @@ struct Process::Impl final : public io::Stream{
 			CloseHandle(m_stdinRead);
 			CloseHandle(m_stdinWrite);
 
-			throw ProcessError("Failed to create stdin pipe");
+			return;
 		}
 
 		SetHandleInformation(m_stdoutRead, HANDLE_FLAG_INHERIT, 0);
@@ -344,7 +348,7 @@ struct Process::Impl final : public io::Stream{
 			CloseHandle(m_stdoutRead);
 			CloseHandle(m_stdoutWrite);
 
-			throw ProcessError("Failed to start process");
+			return;
 		}
 	}
 
@@ -428,7 +432,7 @@ struct Process::Impl final : public io::Stream{
 		return false;
 	}
 
-	void read(char* buffer, std::size_t size) override
+	std::expected<void, io::Error> read(char* buffer, std::size_t size) override
 	{
 		std::size_t totalBytesRead = 0;
 
@@ -436,13 +440,15 @@ struct Process::Impl final : public io::Stream{
 		{
 			DWORD bytesRead;
 			if(!ReadFile(m_stdoutRead, buffer + totalBytesRead, static_cast<DWORD>(size - totalBytesRead), &bytesRead, nullptr))
-				throw io::Error(std::string("Failed to read from process stdout"));
+				return std::unexpected(io::Error(std::string("Failed to read from process stdout")));
 
 			totalBytesRead += bytesRead;
 		}
+
+		return {};
 	}
 
-	void write(const char* buffer, std::size_t size) override
+	std::expected<void, io::Error> write(const char* buffer, std::size_t size) override
 	{
 		std::size_t totalBytesWritten = 0;
 
@@ -450,10 +456,12 @@ struct Process::Impl final : public io::Stream{
 		{
 			DWORD bytesWritten;
 			if(!WriteFile(m_stdinWrite, buffer + totalBytesWritten, static_cast<DWORD>(size - totalBytesWritten), &bytesWritten, nullptr))
-				throw io::Error(std::string("Failed to write to process stdin"));
+				return std::unexpected(io::Error(std::string("Failed to write to process stdin")));
 
 			totalBytesWritten += bytesWritten;
 		}
+
+		return {};
 	}
 #else
 #error Missing implementation or #define
@@ -491,9 +499,6 @@ bool Process::isRunning() const
 
 io::Stream& Process::stdIO()
 {
-	if(!isRunning())
-		throw ProcessError("Process is not running - Cannot get stdio");
-
 	return *m_impl;
 }
 
