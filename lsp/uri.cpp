@@ -1,6 +1,7 @@
 #include <cctype>
 #include <cassert>
 #include <charconv>
+#include <iostream>
 #include <lsp/uri.h>
 
 namespace lsp{
@@ -95,6 +96,7 @@ Uri Uri::parse(std::string_view uriStr)
 {
 	auto uri = Uri();
 
+	std::cerr << "Parsing the Uri scheme\n";
 	const auto schemeLen = static_cast<std::size_t>(parseUriScheme(uriStr));
 
 	if(schemeLen == 0 || !hasCharAt(uriStr, schemeLen, ':'))
@@ -110,6 +112,7 @@ Uri Uri::parse(std::string_view uriStr)
 
 	if(hasAuthority)
 	{
+		std::cerr << "hasAuthority\n";
 		idx += 2; // //
 		const auto authorityLen = parseUriAuthority(uriStr.substr(idx));
 		const auto authority    = uriStr.substr(idx, authorityLen);
@@ -121,6 +124,7 @@ Uri Uri::parse(std::string_view uriStr)
 
 	if(!pathIsEmpty)
 	{
+		std::cerr << "path is not empty\n";
 		if(hasAuthority && uriStr[idx] != '/')
 			return {};
 
@@ -135,6 +139,7 @@ Uri Uri::parse(std::string_view uriStr)
 
 	if(hasQuery)
 	{
+		std::cerr << "hasQuery\n";
 		idx += 1; // ?
 		const auto queryLen = parseUriQuery(uriStr.substr(idx));
 		const auto query    = uriStr.substr(idx, queryLen);
@@ -146,6 +151,7 @@ Uri Uri::parse(std::string_view uriStr)
 
 	if(hasFragment)
 	{
+		std::cerr << "hasFragment\n";
 		idx += 1; // #
 		const auto fragment = uriStr.substr(idx);
 		uri.insertFragment(fragment);

@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -76,8 +78,9 @@ public:
 	[[nodiscard]] std::size_t size() const;
 	[[nodiscard]] bool empty() const;
 	[[nodiscard]] bool contains(std::string_view key) const;
-	[[nodiscard]] Value& get(std::string_view key);
-	[[nodiscard]] const Value& get(std::string_view key) const;
+	// TODO: get() for Value returns should return &
+	[[nodiscard]] std::expected<Value, TypeError> get(std::string_view key);
+	[[nodiscard]] const std::expected<Value, TypeError> get(std::string_view key) const;
 	[[nodiscard]] Value* find(std::string_view key);
 	[[nodiscard]] const Value* find(std::string_view key) const;
 
@@ -114,25 +117,26 @@ public:
 	[[nodiscard]] constexpr bool isObject()  const{ return std::holds_alternative<Object>(m_variant); }
 	[[nodiscard]] constexpr bool isArray()   const{ return std::holds_alternative<Array>(m_variant); }
 
-	[[nodiscard]] Boolean       boolean() const{ return get<Boolean>(); }
-	[[nodiscard]] Integer       integer() const{ return get<Integer>(); }
-	[[nodiscard]] Decimal       decimal() const{ return get<Decimal>(); }
-	[[nodiscard]] const String& string()  const{ return get<String>(); }
-	[[nodiscard]] const Object& object()  const{ return get<Object>(); }
-	[[nodiscard]] const Array&  array()   const{ return get<Array>(); }
-	[[nodiscard]] String&       string(){ return get<String>(); }
-	[[nodiscard]] Object&       object(){ return get<Object>(); }
-	[[nodiscard]] Array&        array(){ return get<Array>(); }
+	[[nodiscard]] std::expected<Boolean, TypeError> boolean() const{ return get<Boolean>(); }
+	[[nodiscard]] std::expected<Integer, TypeError> integer() const{ return get<Integer>(); }
+	[[nodiscard]] std::expected<Decimal, TypeError> decimal() const{ return get<Decimal>(); }
+	// TODO: String, Object, Array should all be &
+	[[nodiscard]] const std::expected<String, TypeError> string()  const{ return get<String>(); }
+	[[nodiscard]] const std::expected<Object, TypeError> object()  const{ return get<Object>(); }
+	[[nodiscard]] const std::expected<Array, TypeError>  array()   const{ return get<Array>(); }
+	[[nodiscard]] std::expected<String, TypeError>       string(){ return get<String>(); }
+	[[nodiscard]] std::expected<Object, TypeError>       object(){ return get<Object>(); }
+	[[nodiscard]] std::expected<Array, TypeError>        array(){ return get<Array>(); }
 
-	[[nodiscard]] Decimal number() const
+	[[nodiscard]] std::expected<Decimal, TypeError> number() const
 	{
 		if(isDecimal())
-			return get<Decimal>();
+			return get<Decimal>().value();
 
 		if(isInteger())
-			return static_cast<Decimal>(get<Integer>());
+			return static_cast<Decimal>(get<Integer>().value());
 
-		throw TypeError{};
+		return std::unexpected(TypeError{});
 	}
 
 	[[nodiscard]] bool operator==(const Value& other) const = default;
@@ -145,21 +149,23 @@ private:
 	VariantType m_variant;
 
 	template<typename T>
-	T& get()
+	// TODO: should be T&
+	std::expected<T, TypeError> get()
 	{
 		if(auto* const v = std::get_if<T>(&m_variant))
 			return *v;
 
-		throw TypeError{};
+		return std::unexpected(TypeError{});
 	}
 
 	template<typename T>
-	const T& get() const
+	// TODO: should be T&
+	const std::expected<T, TypeError> get() const
 	{
 		if(auto* const v = std::get_if<T>(&m_variant))
 			return *v;
 
-		throw TypeError{};
+		return std::unexpected(TypeError{});
 	}
 };
 
@@ -169,7 +175,7 @@ using Any [[deprecated("Use json::Value")]] = Value;
  * parse/stringify
  */
 
-Value       parse(std::string_view text);
+std::expected<Value, ParseError> parse(std::string_view text);
 std::string stringify(const Value& json, bool format = false);
 std::string toStringLiteral(std::string_view str);
 std::string fromStringLiteral(std::string_view str);

@@ -133,7 +133,8 @@ std::string joinStrings(const std::vector<std::string_view>& strings, const std:
 std::string extractDocumentation(const json::Object& json)
 {
 	if(json.contains(strings::documentation))
-		return json.get(strings::documentation).string();
+		// TODO: check for unexpected
+		return json.get(strings::documentation).value().string().value();
 
 	return {};
 }
@@ -173,14 +174,14 @@ struct Type{
 	};
 
 	virtual Category category() const = 0;
-	virtual void extract(const json::Object& json) = 0;
+	virtual std::expected<void, std::runtime_error> extract(const json::Object& json) = 0;
 
 	bool isLiteral() const{
 		const auto cat = category();
 		return cat == StructureLiteral || cat == StringLiteral || cat == IntegerLiteral || cat == BooleanLiteral;
 	}
 
-	static Category categoryFromString(std::string_view str)
+	static std::expected<Category, std::runtime_error> categoryFromString(std::string_view str)
 	{
 		for(std::size_t i = 0; i < std::size(TypeCategoryStrings); ++i)
 		{
@@ -188,7 +189,7 @@ struct Type{
 				return static_cast<Type::Category>(i);
 		}
 
-		throw std::runtime_error{'\'' + std::string{str} + "' is not a valid type kind"};
+		return std::unexpected(std::runtime_error{'\'' + std::string{str} + "' is not a valid type kind"});
 	}
 
 	template<typename T>
@@ -209,7 +210,7 @@ struct Type{
 		return dynamic_cast<const T&>(*this);
 	}
 
-	static TypePtr createFromJson(const json::Object& json);
+	static std::expected<TypePtr, std::logic_error> createFromJson(const json::Object& json);
 };
 
 struct BaseType : Type{
@@ -243,12 +244,14 @@ struct BaseType : Type{
 
 	Category category() const override{ return Category::Base; }
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		kind = kindFromString(json.get(strings::name).string());
+		// TODO: handle unexpected
+		kind = kindFromString(json.get(strings::name).value().string().value()).value();
+		return std::expected<void, std::runtime_error>{};
 	}
 
-	static Kind kindFromString(std::string_view str)
+	static std::expected<Kind, std::runtime_error> kindFromString(std::string_view str)
 	{
 		for(std::size_t i = 0; i < std::size(BaseTypeStrings); ++i)
 		{
@@ -256,7 +259,7 @@ struct BaseType : Type{
 				return static_cast<Kind>(i);
 		}
 
-		throw std::runtime_error{'\'' + std::string{str} + "' is not a valid base type"};
+		return std::unexpected(std::runtime_error{'\'' + std::string{str} + "' is not a valid base type"});
 	}
 };
 
@@ -265,9 +268,11 @@ struct ReferenceType : Type{
 
 	Category category() const override{ return Category::Reference; }
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		name = json.get(strings::name).string();
+		// TODO: handle unexpected
+		name = json.get(strings::name).value().string().value();
+		return std::expected<void, std::runtime_error>{};
 	}
 };
 
@@ -276,10 +281,12 @@ struct ArrayType : Type{
 
 	Category category() const override{ return Category::Array; }
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		const auto& elementTypeJson = json.get(strings::element).object();
-		elementType = createFromJson(elementTypeJson);
+		// TODO: check unexpected and should be const auto&
+		const auto elementTypeJson = json.get(strings::element).value().object().value();
+		elementType = createFromJson(elementTypeJson).value();
+		return std::expected<void, std::runtime_error>{};
 	}
 };
 
@@ -287,10 +294,12 @@ struct MapType : Type{
 	TypePtr keyType;
 	TypePtr valueType;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		keyType = createFromJson(json.get(strings::key).object());
-		valueType = createFromJson(json.get(strings::value).object());
+		// TODO: twice, check unhandled
+		keyType = createFromJson(json.get(strings::key).value().object().value()).value();
+		valueType = createFromJson(json.get(strings::value).value().object().value()).value();
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::Map; }
@@ -299,13 +308,16 @@ struct MapType : Type{
 struct AndType : Type{
 	std::vector<TypePtr> typeList;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		const auto& items = json.get(strings::items).array();
+		// TODO: handle unexpected and should be const auto&
+		const auto items = json.get(strings::items).value().array().value();
 		typeList.reserve(items.size());
 
 		for(const auto& i : items)
-			typeList.push_back(createFromJson(i.object()));
+			// TODO: handle unexpected
+			typeList.push_back(createFromJson(i.object().value()).value());
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::And; }
@@ -314,7 +326,7 @@ struct AndType : Type{
 struct OrType : Type{
 	std::vector<TypePtr> typeList;
 
-	void extract(const json::Object& json) override;
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override;
 
 	Category category() const override{ return Category::Or; }
 };
@@ -322,13 +334,15 @@ struct OrType : Type{
 struct TupleType : Type{
 	std::vector<TypePtr> typeList;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		const auto& items = json.get(strings::items).array();
+		// TODO: handle unexpected and should be const auto&
+		const auto items = json.get(strings::items).value().array().value();
 		typeList.reserve(items.size());
 
 		for(const auto& i : items)
-			typeList.push_back(createFromJson(i.object()));
+			typeList.push_back(createFromJson(i.object().value()).value());
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::Tuple; }
@@ -342,9 +356,9 @@ struct StructureProperty{
 
 	void extract(const json::Object& json)
 	{
-		name = json.get(strings::name).string();
-		type = Type::createFromJson(json.get(strings::type).object());
-		isOptional = json.contains(strings::optional) && json.get(strings::optional).boolean();
+		name = json.get(strings::name).value().string().value();
+		type = Type::createFromJson(json.get(strings::type).value().object().value()).value();
+		isOptional = json.contains(strings::optional) && json.get(strings::optional).value().boolean().value();
 		documentation = extractDocumentation(json);
 	}
 };
@@ -362,7 +376,7 @@ StructurePropertyList extractStructureProperties(const json::Array& json)
 		[](const json::Value& e)
 		{
 			StructureProperty prop;
-			prop.extract(e.object());
+			prop.extract(e.object().value());
 			return prop;
 		});
 	// Sort properties so non-optional ones come first
@@ -380,25 +394,28 @@ StructurePropertyList extractStructureProperties(const json::Array& json)
 struct StructureLiteralType : Type{
 	StructurePropertyList properties;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		const auto& value = json.get(strings::value).object();
-		properties = extractStructureProperties(value.get(strings::properties).array());
+		// TODO: handle unexpected and should be const auto&
+		const auto value = json.get(strings::value).value().object().value();
+		properties = extractStructureProperties(value.get(strings::properties).value().array().value());
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::StructureLiteral; }
 };
 
-void OrType::extract(const json::Object& json)
+std::expected<void, std::runtime_error> OrType::extract(const json::Object& json)
 {
-	const auto& items = json.get(strings::items).array();
+	// TODO handle unexpected and should be const auto&
+	const auto items = json.get(strings::items).value().array().value();
 	typeList.reserve(items.size());
 
 	std::vector<std::unique_ptr<Type>> structureLiterals;
 
 	for(const auto& item : items)
 	{
-		auto type = createFromJson(item.object());
+		auto type = createFromJson(item.object().value()).value();
 
 		if(type->isA<StructureLiteralType>())
 			structureLiterals.push_back(std::move(type));
@@ -441,15 +458,18 @@ void OrType::extract(const json::Object& json)
 	structureLiterals.clear();
 
 	if(typeList.empty())
-		throw std::runtime_error{"OrType must not be empty!"};
+		return std::unexpected(std::runtime_error{"OrType must not be empty!"});
+
+	return std::expected<void, std::runtime_error>();
 }
 
 struct StringLiteralType : Type{
 	std::string stringValue;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		stringValue = json.get(strings::value).string();
+		stringValue = json.get(strings::value).value().string().value();
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::StringLiteral; }
@@ -458,9 +478,10 @@ struct StringLiteralType : Type{
 struct IntegerLiteralType : Type{
 	json::Integer integerValue = 0;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		integerValue = static_cast<json::Integer>(json.get(strings::value).number());
+		integerValue = static_cast<json::Integer>(json.get(strings::value).value().number().value());
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::IntegerLiteral; }
@@ -469,18 +490,21 @@ struct IntegerLiteralType : Type{
 struct BooleanLiteralType : Type{
 	bool booleanValue = false;
 
-	void extract(const json::Object& json) override
+	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		booleanValue = json.get(strings::value).boolean();
+		// TODO: handle unexpected
+		booleanValue = json.get(strings::value).value().boolean().value();
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	Category category() const override{ return Category::BooleanLiteral; }
 };
 
-TypePtr Type::createFromJson(const json::Object& json)
+std::expected<TypePtr, std::logic_error> Type::createFromJson(const json::Object& json)
 {
 	TypePtr result;
-	auto category = categoryFromString(json.get(strings::kind).string());
+	// TODO: handle unexpected
+	auto category = categoryFromString(json.get(strings::kind).value().string().value()).value();
 
 	switch(category)
 	{
@@ -519,7 +543,7 @@ TypePtr Type::createFromJson(const json::Object& json)
 		break;
 	default:
 		assert(!"Invalid type category");
-		throw std::logic_error{"Invalid type category"};
+		return std::unexpected(std::logic_error{"Invalid type category"});
 	}
 
 	assert(result->category() == category);
@@ -546,25 +570,29 @@ struct Enumeration{
 
 	void extract(const json::Object& json)
 	{
-		name = json.get(strings::name).string();
-		const auto& typeJson = json.get(strings::type).object();
-		type = Type::createFromJson(typeJson);
-		const auto& valuesJson = json.get(strings::values).array();
+		name = json.get(strings::name).value().string().value();
+		// TODO: handle unexpected and should be const auto&
+		const auto typeJson = json.get(strings::type).value().object().value();
+		type = Type::createFromJson(typeJson).value();
+		// TODO: handle unexpected and should be const auto&
+		const auto valuesJson = json.get(strings::values).value().array().value();
 		values.reserve(valuesJson.size());
 
 		for(const auto& v : valuesJson)
 		{
-			const auto& obj = v.object();
+			// TODO: handle unexpected
+			const auto obj = v.object().value();
 			auto& enumValue = values.emplace_back();
-			enumValue.name = obj.get(strings::name).string();
-			enumValue.value = obj.get(strings::value);
+			enumValue.name = obj.get(strings::name).value().string().value();
+			enumValue.value = obj.get(strings::value).value();
 			enumValue.documentation = extractDocumentation(obj);
 		}
 
 		documentation = extractDocumentation(json);
 
 		if(json.contains(strings::supportsCustomValues))
-			supportsCustomValues = json.get(strings::supportsCustomValues).boolean();
+			// TODO: handle unexpected
+			supportsCustomValues = json.get(strings::supportsCustomValues).value().boolean().value();
 	}
 };
 
@@ -577,25 +605,28 @@ struct Structure{
 
 	void extract(const json::Object& json)
 	{
-		name = json.get(strings::name).string();
-		properties = extractStructureProperties(json.get(strings::properties).array());
+		// TODO: handle unexpected twice
+		name = json.get(strings::name).value().string().value();
+		properties = extractStructureProperties(json.get(strings::properties).value().array().value());
 
 		if(json.contains(strings::extends))
 		{
-			const auto& extendsJson = json.get(strings::extends).array();
+			// TODO: handle unexpected and should be const auto&
+			const auto extendsJson = json.get(strings::extends).value().array().value();
 			extends.reserve(extendsJson.size());
 
 			for(const auto& e : extendsJson)
-				extends.push_back(Type::createFromJson(e.object()));
+				extends.push_back(Type::createFromJson(e.object().value()).value());
 		}
 
 		if(json.contains(strings::mixins))
 		{
-			const auto& mixinsJson = json.get(strings::mixins).array();
+			// TODO: handle unexpected and should be const auto&
+			const auto mixinsJson = json.get(strings::mixins).value().array().value();
 			mixins.reserve(mixinsJson.size());
 
 			for(const auto& e : mixinsJson)
-				mixins.push_back(Type::createFromJson(e.object()));
+				mixins.push_back(Type::createFromJson(e.object().value()).value());
 		}
 
 		documentation = extractDocumentation(json);
@@ -609,8 +640,8 @@ struct TypeAlias{
 
 	void extract(const json::Object& json)
 	{
-		name = json.get(strings::name).string();
-		type = Type::createFromJson(json.get(strings::type).object());
+		name = json.get(strings::name).value().string().value();
+		type = Type::createFromJson(json.get(strings::type).value().object().value()).value();
 		documentation = extractDocumentation(json);
 	}
 };
@@ -636,18 +667,20 @@ struct Message{
 		if(!json.contains(key))
 			return {};
 
-		const auto& type = json.get(key).object();
+		// TODO: handle unexpected and should be const auto&
+		const auto type = json.get(key).value().object().value();
 
-		if(type.get(strings::kind).string() == "reference")
-			return type.get(strings::name).string();
+		if(type.get(strings::kind).value().string().value() == "reference")
+			return type.get(strings::name).value().string().value();
 
-		return json.get(strings::method).string() + capitalizeString(key);
+		return json.get(strings::method).value().string().value() + capitalizeString(key);
 	}
 
-	void extract(const json::Object& json)
+	std::expected<void, std::runtime_error> extract(const json::Object& json)
 	{
 		documentation = extractDocumentation(json);
-		const auto& dir = json.get(strings::messageDirection).string();
+		// TODO: check unexpected and should be const auto&
+		const auto dir = json.get(strings::messageDirection).value().string().value();
 
 		if(dir == strings::clientToServer)
 			direction = Direction::ClientToServer;
@@ -656,13 +689,15 @@ struct Message{
 		else if(dir == strings::both)
 			direction = Direction::Both;
 		else
-			throw std::runtime_error{"Invalid message direction: " + dir};
+			return std::unexpected(std::runtime_error{"Invalid message direction: " + dir});
 
 		paramsTypeName = memberTypeName(json, strings::params);
 		resultTypeName = memberTypeName(json, strings::result);
 		partialResultTypeName = memberTypeName(json, strings::partialResult);
 		errorDataTypeName = memberTypeName(json, strings::errorData);
 		registrationOptionsTypeName = memberTypeName(json, strings::registrationOptions);
+
+		return std::expected<void, std::runtime_error>{};
 	}
 };
 
@@ -677,7 +712,7 @@ public:
 		extractMessages(json);
 	}
 
-	std::variant<const Enumeration*, const Structure*, const TypeAlias*> typeForName(std::string_view name) const
+	std::expected<std::variant<const Enumeration*, const Structure*, const TypeAlias*>, std::runtime_error> typeForName(std::string_view name) const
 	{
 		if(auto it = m_typesByName.find(std::string{name}); it != m_typesByName.end())
 		{
@@ -692,7 +727,7 @@ public:
 			}
 		}
 
-		throw std::runtime_error{"Type with name '" + std::string{name} + "' does not exist"};
+		return std::unexpected(std::runtime_error{"Type with name '" + std::string{name} + "' does not exist"});
 	}
 
 	enum class MessageType{
@@ -743,8 +778,9 @@ private:
 
 	void extractMetaData(const json::Object& json)
 	{
-		const auto& metaDataJson = json.get("metaData").object();
-		m_metaData.version = metaDataJson.get("version").string();
+		// TODO: should be const auto& and twice handle unexpected
+		const auto metaDataJson = json.get("metaData").value().object().value();
+		m_metaData.version = metaDataJson.get("version").value().string().value();
 	}
 
 	void extractTypes(const json::Object& json)
@@ -760,69 +796,81 @@ private:
 		extractNotifications(json);
 	}
 
-	void extractRequests(const json::Object& json)
+	std::expected<void, std::runtime_error> extractRequests(const json::Object& json)
 	{
-		const auto& requests = json.get("requests").array();
+		// TODO: check unhandled and should be const auto&
+		const auto requests = json.get("requests").value().array().value();
 
 		for(const auto& r : requests)
 		{
-			const auto& obj = r.object();
-			const auto& method = obj.get(strings::method).string();
+			// TODO: twice check unhandled and should be const auto&
+			const auto obj = r.object().value();
+			const auto method = obj.get(strings::method).value().string().value();
 
 			if(m_requestsByMethod.contains(method))
-				throw std::runtime_error{"Duplicate request method: " + method};
+				return std::unexpected(std::runtime_error{"Duplicate request method: " + method});
 
 			m_requestsByMethod[method].extract(obj);
 		}
+
+		return std::expected<void, std::runtime_error>{};
 	}
 
-	void extractNotifications(const json::Object& json)
+	std::expected<void, std::runtime_error> extractNotifications(const json::Object& json)
 	{
-		const auto& notifications = json.get("notifications").array();
+		// TODO: should be const auto& and check unexpected
+		const auto notifications = json.get("notifications").value().array().value();
 
 		for(const auto& r : notifications)
 		{
-			const auto& obj = r.object();
-			const auto& method = obj.get(strings::method).string();
+			// TODO: twice handle unexpected and should be const auto&
+			const auto obj = r.object().value();
+			const auto method = obj.get(strings::method).value().string().value();
 
 			if(m_notificationsByMethod.contains(method))
-				throw std::runtime_error{"Duplicate request method: " + method};
+				return std::unexpected(std::runtime_error{"Duplicate request method: " + method});
 
 			m_notificationsByMethod[method].extract(obj);
 		}
+
+		return std::expected<void, std::runtime_error>{};
 	}
 
-	void insertType(const std::string& name, Type type, std::size_t index)
+	std::expected<void, std::runtime_error> insertType(const std::string& name, Type type, std::size_t index)
 	{
 		if(m_typesByName.contains(name))
-			throw std::runtime_error{"Duplicate type '" + name + '\"'};
+			return std::unexpected(std::runtime_error{"Duplicate type '" + name + '\"'});
 
 		auto it = m_typesByName.insert(std::pair(name, TypeIndex{type, index})).first;
 		m_typeNames.push_back(it->first);
+
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	void extractEnumerations(const json::Object& json)
 	{
-		const auto& enumerations = json.get("enumerations").array();
+		// TODO: check unexpected and should be const auto&
+		const auto enumerations = json.get("enumerations").value().array().value();
 
 		m_enumerations.resize(enumerations.size());
 
 		for(std::size_t i = 0; i < enumerations.size(); ++i)
 		{
-			m_enumerations[i].extract(enumerations[i].object());
+			m_enumerations[i].extract(enumerations[i].object().value());
 			insertType(m_enumerations[i].name, Type::Enumeration, i);
 		}
 	}
 
 	void extractStructures(const json::Object& json)
 	{
-		const auto& structures = json.get("structures").array();
+		// TODO: check unexpected and should be const auto&
+		const auto structures = json.get("structures").value().array().value();
 
 		m_structures.resize(structures.size());
 
 		for(std::size_t i = 0; i < structures.size(); ++i)
 		{
-			m_structures[i].extract(structures[i].object());
+			m_structures[i].extract(structures[i].object().value());
 			insertType(m_structures[i].name, Type::Structure, i);
 		}
 	}
@@ -831,13 +879,14 @@ private:
 	{
 		if(json.contains(key))
 		{
-			const auto& typeJson = json.get(key).object();
+			// TODO: handle unexpected and should be const auto&
+			const auto typeJson = json.get(key).value().object().value();
 
-			if(typeJson.get(strings::kind).string() != "reference")
+			if(typeJson.get(strings::kind).value().string().value() != "reference")
 			{
 				auto& alias = m_typeAliases.emplace_back();
 				alias.name = typeBaseName + capitalizeString(key);
-				alias.type = ::Type::createFromJson(typeJson);
+				alias.type = ::Type::createFromJson(typeJson).value();
 				alias.documentation = extractDocumentation(typeJson);
 				insertType(alias.name, Type::TypeAlias, m_typeAliases.size() - 1);
 			}
@@ -846,24 +895,26 @@ private:
 
 	void extractTypeAliases(const json::Object& json)
 	{
-		const auto& typeAliases = json.get("typeAliases").array();
+		// TODO: handle unexpected and should be const auto&
+		const auto typeAliases = json.get("typeAliases").value().array().value();
 
 		m_typeAliases.resize(typeAliases.size());
 
 		for(std::size_t i = 0; i < typeAliases.size(); ++i)
 		{
-			m_typeAliases[i].extract(typeAliases[i].object());
+			m_typeAliases[i].extract(typeAliases[i].object().value());
 			insertType(m_typeAliases[i].name, Type::TypeAlias, i);
 		}
 
 		// Extract message and notification parameter and result types
 
-		const auto& requests = json.get("requests").array();
+		// TODO: handle unexpected and should be const auto&
+		const auto requests = json.get("requests").value().array().value();
 
 		for(const auto& r : requests)
 		{
-			const auto& obj = r.object();
-			const auto& typeBaseName = obj.get(strings::method).string();
+			const auto obj = r.object().value();
+			const auto typeBaseName = obj.get(strings::method).value().string().value();
 
 			addTypeAlias(obj, strings::result, typeBaseName);
 			addTypeAlias(obj, strings::params, typeBaseName);
@@ -872,12 +923,14 @@ private:
 			addTypeAlias(obj, strings::registrationOptions, typeBaseName);
 		}
 
-		const auto& notifications = json.get("notifications").array();
+		// TODO: handle unexpected and should be const auto&
+		const auto notifications = json.get("notifications").value().array().value();
 
 		for(const auto& n : notifications)
 		{
-			const auto& obj = n.object();
-			const auto& typeBaseName = obj.get(strings::method).string();
+			// TODO: handle unexpected and should be const auto&
+			const auto obj = n.object().value();
+			const auto typeBaseName = obj.get(strings::method).value().string().value();
 			addTypeAlias(obj, strings::params, typeBaseName);
 			addTypeAlias(obj, strings::registrationOptions, typeBaseName);
 		}
@@ -1194,13 +1247,13 @@ private:
 			m_typesBeingProcessed.insert(ptr->name);
 			generate(*ptr);
 			m_typesBeingProcessed.erase(ptr->name);
-		}, m_metaModel.typeForName(name));
+		}, m_metaModel.typeForName(name).value());
 	}
 
-	void generate(const Enumeration& enumeration)
+	std::expected<void, std::runtime_error> generate(const Enumeration& enumeration)
 	{
 		if(!enumeration.type->isA<BaseType>())
-			throw std::runtime_error{"Enumeration value type for '" + enumeration.name + "' must be a base type"};
+			return std::unexpected(std::runtime_error{"Enumeration value type for '" + enumeration.name + "' must be a base type"});
 
 		const auto enumTypeCppName = upperCaseIdentifier(enumeration.name);
 		const auto enumerationCppName = enumTypeCppName + "Enum";
@@ -1239,6 +1292,8 @@ private:
 		                            "const " + enumerationCppName + "::ConstInitType " + enumerationCppName + "::s_values[];\n\n";
 
 		m_typesSourceFileContent += "\n};\n\n";
+
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	bool isStringType(const TypePtr& type)
@@ -1252,7 +1307,8 @@ private:
 		else if(type->isA<ReferenceType>())
 		{
 			const auto& ref = type->as<ReferenceType>();
-			auto refType = m_metaModel.typeForName(ref.name);
+			// TODO: handle unexpected
+			auto refType = m_metaModel.typeForName(ref.name).value();
 
 			if(std::holds_alternative<const TypeAlias*>(refType))
 				return isStringType(std::get<const TypeAlias*>(refType)->type);
@@ -1261,7 +1317,7 @@ private:
 		return false;
 	}
 
-	std::string cppTypeName(const Type& type, bool optional = false)
+	std::expected<std::string, std::logic_error> cppTypeName(const Type& type, bool optional = false)
 	{
 		std::string typeName;
 
@@ -1283,7 +1339,8 @@ private:
 				const auto& ref = type.as<ReferenceType>();
 				typeName += upperCaseIdentifier(ref.name);
 
-				const auto typeVariant = m_metaModel.typeForName(ref.name);
+				// TODO: handle unexpected
+				const auto typeVariant = m_metaModel.typeForName(ref.name).value();
 				if(std::holds_alternative<const Enumeration*>(typeVariant))
 					typeName += "Enum";
 
@@ -1295,7 +1352,7 @@ private:
 				if(arrayType.elementType->isA<ReferenceType>() && arrayType.elementType->as<ReferenceType>().name == "LSPAny")
 					typeName += "LSPArray";
 				else
-					typeName += "Array<" + cppTypeName(*arrayType.elementType) + '>';
+					typeName += "Array<" + cppTypeName(*arrayType.elementType).value() + '>';
 
 				break;
 			}
@@ -1309,7 +1366,7 @@ private:
 				else
 					typeName += "std::unordered_map<";
 
-				typeName += cppTypeName(*keyType) + ", " + cppTypeName(*valueType) + '>';
+				typeName += cppTypeName(*keyType).value() + ", " + cppTypeName(*valueType).value() + '>';
 
 				break;
 			}
@@ -1341,13 +1398,13 @@ private:
 							++it;
 
 						assert(it != orType.typeList.end());
-						cppOrType += cppTypeName(**it);
+						cppOrType += cppTypeName(**it).value();
 						++it;
 
 						while(it != orType.typeList.end())
 						{
 							if(it != nullType)
-								cppOrType += ", " + cppTypeName(**it);
+								cppOrType += ", " + cppTypeName(**it).value();
 
 							++it;
 						}
@@ -1360,7 +1417,7 @@ private:
 				else
 				{
 					assert(!orType.typeList.empty());
-					typeName += cppTypeName(*orType.typeList[0]);
+					typeName += cppTypeName(*orType.typeList[0]).value();
 				}
 
 				break;
@@ -1372,12 +1429,12 @@ private:
 
 				if(auto it = tupleType.typeList.begin(); it != tupleType.typeList.end())
 				{
-					cppTupleType += cppTypeName(**it);
+					cppTupleType += cppTypeName(**it).value();
 					++it;
 
 					while(it != tupleType.typeList.end())
 					{
-						cppTupleType += ", " + cppTypeName(**it);
+						cppTupleType += ", " + cppTypeName(**it).value();
 						++it;
 					}
 				}
@@ -1401,7 +1458,7 @@ private:
 			break;
 		default:
 			assert(!"Invalid type category");
-			throw std::logic_error{"Invalid type category"};
+			return std::unexpected(std::logic_error{"Invalid type category"});
 		}
 
 		if(optional)
@@ -1536,7 +1593,8 @@ private:
 			// Don't write literal properties with the same name as an inherited property. Instead initialize the inherited property.
 			if(!isInheritedLiteral)
 			{
-				const auto typeName = cppTypeName(*p.type, p.isOptional);
+				// TODO: handle unexpected
+				const auto typeName = cppTypeName(*p.type, p.isOptional).value();
 
 				m_typesHeaderFileContent += documentationComment({}, p.documentation, 1) +
 				                            '\t' + typeName + ' ' + p.name;
@@ -1585,7 +1643,7 @@ private:
 		}
 	}
 
-	void generate(const Structure& structure)
+	std::expected<void, std::runtime_error> generate(const Structure& structure)
 	{
 		std::string structureCppName = upperCaseIdentifier(structure.name);
 
@@ -1629,7 +1687,7 @@ private:
 			propertiesFromJson += '\t' + lower + "FromJson(json, value);\n";
 			++it;
 
-			for(const auto& p : std::get<const Structure*>(m_metaModel.typeForName(extends->name))->properties)
+			for(const auto& p : std::get<const Structure*>(m_metaModel.typeForName(extends->name).value())->properties)
 			{
 				if(!p.isOptional)
 					requiredPropertiesList.push_back(p.name);
@@ -1646,7 +1704,7 @@ private:
 				propertiesFromJson += '\t' + lower + "FromJson(json, value);\n";
 				++it;
 
-				for(const auto& p : std::get<const Structure*>(m_metaModel.typeForName(extends->name))->properties)
+				for(const auto& p : std::get<const Structure*>(m_metaModel.typeForName(extends->name).value())->properties)
 				{
 					if(!p.isOptional)
 						requiredPropertiesList.push_back(p.name);
@@ -1662,12 +1720,12 @@ private:
 		for(const auto& m : structure.mixins)
 		{
 			if(!m->isA<ReferenceType>())
-				throw std::runtime_error{"Mixin type for '" + structure.name + "' must be a type reference"};
+				return std::unexpected(std::runtime_error{"Mixin type for '" + structure.name + "' must be a type reference"});
 
-			auto type = m_metaModel.typeForName(m->as<ReferenceType>().name);
+			auto type = m_metaModel.typeForName(m->as<ReferenceType>().name).value();
 
 			if(!std::holds_alternative<const Structure*>(type))
-				throw std::runtime_error{"Mixin type for '" + structure.name + "' must be a structure type"};
+				return std::unexpected(std::runtime_error{"Mixin type for '" + structure.name + "' must be a structure type"});
 
 			generateStructureProperties(std::get<const Structure*>(type)->properties, basePropertiesByName, propertiesToJson, propertiesFromJson, requiredPropertiesList, literalPropertiesList, inheritedLiterals);
 		}
@@ -1732,6 +1790,8 @@ private:
 		                                       "\tauto& obj = json.object();\n"
 		                                       "\t" + uncapitalizeString(structureCppName) + "FromJson(obj, value);\n"
 		                                       "}\n\n";
+
+		return std::expected<void, std::runtime_error>{};
 	}
 
 	void generate(const TypeAlias& typeAlias)
@@ -1741,7 +1801,7 @@ private:
 		generateType(typeAlias.type, typeAliasCppName, true);
 
 		m_typesHeaderFileContent += documentationComment(typeAliasCppName, typeAlias.documentation) +
-		                            "using " + typeAliasCppName + " = " + cppTypeName(*typeAlias.type) + ";\n\n";
+		                            "using " + typeAliasCppName + " = " + cppTypeName(*typeAlias.type).value() + ";\n\n";
 	}
 };
 
@@ -1771,37 +1831,53 @@ int main(int argc, char** argv)
 
 	if(std::ifstream in{inputFileName, std::ios::binary})
 	{
-		try
-		{
+		// try
+		// {
 			in.seekg(0, std::ios::end);
-			std::streamsize size = in.tellg();
+			std::streamsize size = static_cast<std::streamsize>(in.tellg());
 			in.seekg(0, std::ios::beg);
 			std::string jsonText;
 			jsonText.resize(static_cast<std::string::size_type>(size));
 			in.read(&jsonText[0], size);
 			in.close();
-			auto json = json::parse(jsonText).object();
+			// TODO: handle unexpected
+
+			std::cerr << "Trying to parse from file " << inputFileName << std::endl;
+			auto parseResult = json::parse(jsonText);
+			if (!parseResult.has_value())
+			{
+				std::cerr << "JSON parse error at " << parseResult.error().textPos() << ": " << parseResult.error().what() << std::endl;
+				return EXIT_FAILURE;
+			}
+			auto json = parseResult.value().object();
+			if (!json.has_value())
+			{
+				std::cerr << "JSON parse error: " << json.error().what() << std::endl;
+				return EXIT_FAILURE;
+			}
 			MetaModel metaModel;
-			metaModel.extract(json);
+			metaModel.extract(json.value());
 			CppGenerator generator{&metaModel};
 			generator.generate();
 			generator.writeFiles();
-		}
-		catch(const json::ParseError& e)
-		{
-			std::cerr << "JSON parse error at offset " << e.textPos() << ": " << e.what() << std::endl;
-			ExitCode = EXIT_FAILURE;
-		}
-		catch(const std::exception& e)
-		{
-			std::cerr << "Error: " << e.what() << std::endl;
-			ExitCode = EXIT_FAILURE;
-		}
-		catch(...)
-		{
-			std::cerr << "Unknown error" << std::endl;
-			ExitCode = EXIT_FAILURE;
-		}
+		// TODO: handle unexpected exceptions from above code generate according error messages on std::cerr
+
+		// }
+		// catch(const json::ParseError& e)
+		// {
+		// 	std::cerr << "JSON parse error at offset " << e.textPos() << ": " << e.what() << std::endl;
+		// 	ExitCode = EXIT_FAILURE;
+		// }
+		// catch(const std::exception& e)
+		// {
+		// 	std::cerr << "Error: " << e.what() << std::endl;
+		// 	ExitCode = EXIT_FAILURE;
+		// }
+		// catch(...)
+		// {
+		// 	std::cerr << "Unknown error" << std::endl;
+		// 	ExitCode = EXIT_FAILURE;
+		// }
 	}
 	else
 	{

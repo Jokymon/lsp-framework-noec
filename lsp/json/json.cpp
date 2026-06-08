@@ -43,9 +43,10 @@ public:
 		return textOffset(m_pos);
 	}
 
-	Value parse()
+	std::expected<Value, ParseError> parse()
 	{
 		Value result;
+		std::expected<void, ParseError> res;
 
 		pushState(State::Value, result);
 
@@ -54,21 +55,29 @@ public:
 			skipWhitespace();
 
 			if(atEnd())
-				throw ParseError{"Unexpected end of input", currentTextOffset()};
+				return std::unexpected(ParseError{"Unexpected end of input", currentTextOffset()});
 
 			switch(currentState())
 			{
 			case State::Value:
-				handleValue();
+				res = handleValue();
+				if (!res.has_value())
+					return std::unexpected(res.error());
 				break;
 			case State::Object:
-				handleObject();
+				res = handleObject();
+				if (!res.has_value())
+					return std::unexpected(res.error());
 				break;
 			case State::ObjectKey:
-				handleObjectKey();
+				res = handleObjectKey();
+				if (!res.has_value())
+					return std::unexpected(res.error());
 				break;
 			case State::Array:
-				handleArray();
+				res = handleArray();
+				if (!res.has_value())
+					return std::unexpected(res.error());
 				break;
 			}
 		}
@@ -76,7 +85,7 @@ public:
 		skipWhitespace();
 
 		if(!atEnd())
-			throw ParseError{"Trailing characters in json", currentTextOffset()};
+			return std::unexpected(ParseError{"Trailing characters in json", currentTextOffset()});
 
 		return result;
 	}
@@ -105,7 +114,7 @@ private:
 	const char* const            m_end   = nullptr;
 	const char*                  m_pos   = nullptr;
 
-	void handleValue()
+	std::expected<void, ParseError> handleValue()
 	{
 		assert(currentState() == State::Value);
 
@@ -123,12 +132,17 @@ private:
 		}
 		else
 		{
-			currentValue() = parseSimpleValue();
+			auto simpleValue = parseSimpleValue();
+			if (!simpleValue.has_value())
+				return std::unexpected(simpleValue.error());
+			currentValue() = simpleValue.value();
 			popState();
 		}
+
+		return std::expected<void, ParseError>();
 	}
 
-	void handleObject()
+	std::expected<void, ParseError> handleObject()
 	{
 		assert(currentState() == State::Object);
 
@@ -140,46 +154,55 @@ private:
 		}
 		else
 		{
-			if(!currentValue().object().empty())
+			auto& object = currentValueAs<Object>();
+
+			if(!object.empty())
 			{
 				if(*m_pos != ',')
-					throw ParseError{"Expected ','", currentTextOffset()};
+					return std::unexpected(ParseError{"Expected ','", currentTextOffset()});
 
 				const char* pos = m_pos;
 				++m_pos;
 				skipWhitespace();
 
 				if(!atEnd() && *m_pos == '}')
-					throw ParseError{"Trailing ','", textOffset(pos)};
+					return std::unexpected(ParseError{"Trailing ','", textOffset(pos)});
 			}
 
 			pushState(State::ObjectKey, currentValue());
 		}
+
+		return std::expected<void, ParseError>();
 	}
 
-	void handleObjectKey()
+	std::expected<void, ParseError> handleObjectKey()
 	{
 		assert(currentState() == State::ObjectKey);
 
 		const char* keyPos = m_pos;
-		auto&       object = currentValue().object();
-		const auto  key    = parseString();
+		auto&      object = currentValueAs<Object>();
+		const auto key    = parseString();
 
-		if(object.contains(key))
-			throw ParseError{"Duplicate key '" + key + "'", textOffset(keyPos)};
+		if (!key.has_value())
+			return std::unexpected(key.error());
+
+		if(object.contains(key.value()))
+			return std::unexpected(ParseError{"Duplicate key '" + key.value() + "'", textOffset(keyPos)});
 
 		skipWhitespace();
 
-		if(!atEnd() && *m_pos != ':')
-			throw ParseError{"Expected ':'", currentTextOffset()};
+		if(atEnd() || *m_pos != ':')
+			return std::unexpected(ParseError{"Expected ':'", currentTextOffset()});
 
 		++m_pos;
 
 		popState();
-		pushState(State::Value, object[key]);
+		pushState(State::Value, object[key.value()]);
+
+		return std::expected<void, ParseError>();
 	}
 
-	void handleArray()
+	std::expected<void, ParseError> handleArray()
 	{
 		assert(currentState() == State::Array);
 
@@ -191,23 +214,25 @@ private:
 		}
 		else
 		{
-			auto& array = currentValue().array();
+			auto& array = currentValueAs<Array>();
 
 			if(!array.empty())
 			{
 				if(*m_pos != ',')
-					throw ParseError{"Expected ','", currentTextOffset()};
+					return std::unexpected(ParseError{"Expected ','", currentTextOffset()});
 
 				const char* pos = m_pos;
 				++m_pos;
 				skipWhitespace();
 
 				if(!atEnd() && *m_pos == ']')
-					throw ParseError{"Trailing ','", textOffset(pos)};
+					return std::unexpected(ParseError{"Trailing ','", textOffset(pos)});
 			}
 
 			pushState(State::Value, array.emplace_back());
 		}
+
+		return std::expected<void, ParseError>();
 	}
 
 	State currentState() const
@@ -220,6 +245,14 @@ private:
 	{
 		assert(!m_stateStack.empty());
 		return *m_stateStack.back().value;
+	}
+
+	template<typename T>
+	T& currentValueAs()
+	{
+		auto* value = std::get_if<T>(&currentValue().variant());
+		assert(value != nullptr);
+		return *value;
 	}
 
 	void pushState(State state, Value& value)
@@ -239,10 +272,10 @@ private:
 			++m_pos;
 	}
 
-	String parseString()
+	std::expected<String, ParseError> parseString()
 	{
 		if(atEnd() || *m_pos != '\"')
-			throw ParseError{"String expected", currentTextOffset()};
+			return std::unexpected(ParseError{"String expected", currentTextOffset()});
 
 		const char* const stringStart = m_pos++;
 		auto              hasEscape   = false;
@@ -250,7 +283,7 @@ private:
 		for(;;)
 		{
 			if(atEnd() || *m_pos == '\n')
-				throw ParseError("Unmatched '\"'", currentTextOffset());
+				return std::unexpected(ParseError("Unmatched '\"'", currentTextOffset()));
 
 			if(!hasEscape && *m_pos == '"')
 			{
@@ -265,7 +298,7 @@ private:
 		return fromStringLiteral(std::string_view(stringStart, m_pos));
 	}
 
-	Value parseNumber()
+	std::expected<Value, ParseError> parseNumber()
 	{
 		const char* numberStart = m_pos;
 		bool isDecimal = false;
@@ -290,7 +323,7 @@ private:
 			const Decimal decimal = std::stod(std::string{numberStart, m_pos}, &idx);
 
 			if(idx < static_cast<std::size_t>(std::distance(numberStart, m_pos)))
-				throw ParseError{"Invalid number value: '" + std::string{numberStart, m_pos} + "'", textOffset(numberStart)};
+				return std::unexpected(ParseError{"Invalid number value: '" + std::string{numberStart, m_pos} + "'", textOffset(numberStart)});
 
 			return decimal;
 		}
@@ -299,7 +332,7 @@ private:
 		const auto [ptr, ec] = std::from_chars(numberStart, m_pos, intValue);
 
 		if(ec != std::errc{} || ptr != m_pos)
-			throw ParseError{"Invalid number value: '" + std::string{numberStart, m_pos} + "'", textOffset(numberStart)};
+			return std::unexpected(ParseError{"Invalid number value: '" + std::string{numberStart, m_pos} + "'", textOffset(numberStart)});
 
 		if(intValue < std::numeric_limits<json::Integer>::min() || intValue > std::numeric_limits<json::Integer>::max())
 			return static_cast<json::Decimal>(intValue);
@@ -307,7 +340,7 @@ private:
 		return static_cast<json::Integer>(intValue);
 	}
 
-	Value parseIdentifier()
+	std::expected<Value, ParseError> parseIdentifier()
 	{
 		const char* idStart = m_pos;
 
@@ -325,10 +358,10 @@ private:
 		if(identifier == NullValueString)
 			return Null();
 
-		throw ParseError{"Unexpected '" + std::string(identifier) + "'", currentTextOffset()};
+		return std::unexpected(ParseError{"Unexpected '" + std::string(identifier) + "'", currentTextOffset()});
 	}
 
-	Value parseSimpleValue()
+	std::expected<Value, ParseError> parseSimpleValue()
 	{
 		if(*m_pos == '\"')
 			return parseString();
@@ -339,7 +372,7 @@ private:
 		if(std::isalpha(static_cast<unsigned char>(*m_pos)))
 			return parseIdentifier();
 
-		throw ParseError{"Unexpected token", currentTextOffset()};
+		return std::unexpected(ParseError{"Unexpected token", currentTextOffset()});
 	}
 };
 
@@ -373,15 +406,15 @@ void stringifyImplementation(const Value& json, std::string& str, std::size_t in
 	}
 	else if(json.isBoolean())
 	{
-		str += json.boolean() ? TrueValueString : FalseValueString;
+		str += json.boolean().value() ? TrueValueString : FalseValueString;
 	}
 	else if(json.isInteger())
 	{
-		str += std::to_string(json.integer());
+		str += std::to_string(json.integer().value());
 	}
 	else if(json.isDecimal())
 	{
-		auto numberStr = std::to_string(json.decimal());
+		auto numberStr = std::to_string(json.decimal().value());
 
 		for(std::size_t i = numberStr.size(); i > 2; --i)
 		{
@@ -395,11 +428,11 @@ void stringifyImplementation(const Value& json, std::string& str, std::size_t in
 	}
 	else if(json.isString())
 	{
-		str += toStringLiteral(json.string());
+		str += toStringLiteral(json.string().value());
 	}
 	else if(json.isObject())
 	{
-		const auto& objMap = json.object().keyValueMap();
+		const auto& objMap = json.object().value().keyValueMap();
 
 		str += '{';
 
@@ -432,7 +465,8 @@ void stringifyImplementation(const Value& json, std::string& str, std::size_t in
 	}
 	else if(json.isArray())
 	{
-		const auto& array = json.array();
+		// TODO: handle unexpected and should be const auto&
+		auto array = json.array().value();
 
 		str += '[';
 
@@ -539,20 +573,20 @@ Value& Object::operator[](std::string_view key)
 	return m_map->insert({std::string(key), Value()}).first->second;
 }
 
-Value& Object::get(std::string_view key)
+std::expected<Value, TypeError> Object::get(std::string_view key)
 {
 	if(const auto it = m_map->find(key); it != m_map->end())
 		return it->second;
 
-	throw TypeError("Missing key '" + std::string{key} + '\'');
+	return std::unexpected(TypeError("Missing key '" + std::string{key} + '\''));
 }
 
-const Value& Object::get(std::string_view key) const
+const std::expected<Value, TypeError> Object::get(std::string_view key) const
 {
 	if(const auto it = m_map->find(key); it != m_map->end())
 		return it->second;
 
-	throw TypeError("Missing key '" + std::string{key} + '\'');
+	return std::unexpected(TypeError("Missing key '" + std::string{key} + '\''));
 }
 
 Value* Object::find(std::string_view key)
@@ -581,7 +615,7 @@ const Object::MapType& Object::keyValueMap() const
 	return *m_map;
 }
 
-Value parse(std::string_view text)
+std::expected<Value, ParseError> parse(std::string_view text)
 {
 	Parser parser{text};
 
