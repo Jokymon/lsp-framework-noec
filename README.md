@@ -1,6 +1,8 @@
-# lsp-framework
+# lsp-framework-noec
 
 This is an implementation of the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/overviews/lsp/overview/) in C++. It can be used to implement both servers and clients that communicate using the LSP.
+
+This particular fork of https://github.com/leon-bckl/lsp-framework aims to provide a C++ language server and client implementation that doesn't rely on exceptions and can thus be used on WebAssembly targets which don't support exceptions such as the Clang-based [WASI SDK](https://github.com/webassembly/wasi-sdk) until version 30.
 
 ## Overview
 
@@ -11,7 +13,7 @@ All messages can be found in the generated `<lsp/messages.h>` header with reques
 
 ## Building And Linking
 
-There aren't any external dependencies except for `cmake` and a compiler that supports C++20.
+There aren't any external dependencies except for `cmake` and a compiler that supports C++23.
 
 The project is built as a static library. LSP type definitions, messages and serialization boilerplate are generated from the official [meta model](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/lsp/3.17/metaModel/metaModel.json) during the build.
 
@@ -36,13 +38,11 @@ In cross builds, the project now splits build-time tools from target artifacts:
 
 This avoids requiring a WASM runtime just to generate source files during the build.
 
-If you want to run WASM test executables through `ctest`, make sure `wasmtime` is on `PATH` before configuring. On this repository's Windows setup you can use [env.ps1](./env.ps1):
-
-`./env.ps1`
+If you want to run WASM test executables through `ctest`, make sure `wasmtime` is on `PATH` before configuring.
 
 The WASM toolchain will automatically set `CMAKE_CROSSCOMPILING_EMULATOR` to `wasmtime run` when `wasmtime` is discoverable. If needed, you can also set it explicitly during configure:
 
-`cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DCMAKE_CROSSCOMPILING_EMULATOR="C:/path/to/wasmtime.exe;run"`
+`cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DCMAKE_CROSSCOMPILING_EMULATOR="C:/path/to/wasmtime.exe run"`
 
 ### Build Options
 
