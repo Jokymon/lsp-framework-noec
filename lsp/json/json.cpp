@@ -432,7 +432,7 @@ void stringifyImplementation(const Value& json, std::string& str, std::size_t in
 	}
 	else if(json.isObject())
 	{
-		auto obj = json.object().value();
+		const auto& obj = json.object().value();
 		const auto& objMap = obj.keyValueMap();
 
 		str += '{';
@@ -466,8 +466,7 @@ void stringifyImplementation(const Value& json, std::string& str, std::size_t in
 	}
 	else if(json.isArray())
 	{
-		// TODO: handle unexpected and should be const auto&
-		auto array = json.array().value();
+		const auto& array = json.array().value();
 
 		str += '[';
 
@@ -574,7 +573,7 @@ Value& Object::operator[](std::string_view key)
 	return m_map->insert({std::string(key), Value()}).first->second;
 }
 
-std::expected<Value, TypeError> Object::get(std::string_view key)
+ExpectedRef<Value, TypeError> Object::get(std::string_view key)
 {
 	if(const auto it = m_map->find(key); it != m_map->end())
 		return it->second;
@@ -582,7 +581,7 @@ std::expected<Value, TypeError> Object::get(std::string_view key)
 	return std::unexpected(TypeError("Missing key '" + std::string{key} + '\''));
 }
 
-const std::expected<Value, TypeError> Object::get(std::string_view key) const
+ExpectedRef<const Value, TypeError> Object::get(std::string_view key) const
 {
 	if(const auto it = m_map->find(key); it != m_map->end())
 		return it->second;

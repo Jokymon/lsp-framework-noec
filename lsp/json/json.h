@@ -4,11 +4,11 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
+#include <lsp/expectedref.h>
 #include <lsp/exception.h>
 #include <lsp/strmap.h>
 
@@ -78,9 +78,8 @@ public:
 	[[nodiscard]] std::size_t size() const;
 	[[nodiscard]] bool empty() const;
 	[[nodiscard]] bool contains(std::string_view key) const;
-	// TODO: get() for Value returns should return &
-	[[nodiscard]] std::expected<Value, TypeError> get(std::string_view key);
-	[[nodiscard]] const std::expected<Value, TypeError> get(std::string_view key) const;
+	[[nodiscard]] ExpectedRef<Value, TypeError> get(std::string_view key);
+	[[nodiscard]] ExpectedRef<const Value, TypeError> get(std::string_view key) const;
 	[[nodiscard]] Value* find(std::string_view key);
 	[[nodiscard]] const Value* find(std::string_view key) const;
 
@@ -117,24 +116,26 @@ public:
 	[[nodiscard]] constexpr bool isObject()  const{ return std::holds_alternative<Object>(m_variant); }
 	[[nodiscard]] constexpr bool isArray()   const{ return std::holds_alternative<Array>(m_variant); }
 
-	[[nodiscard]] std::expected<Boolean, TypeError> boolean() const{ return get<Boolean>(); }
-	[[nodiscard]] std::expected<Integer, TypeError> integer() const{ return get<Integer>(); }
-	[[nodiscard]] std::expected<Decimal, TypeError> decimal() const{ return get<Decimal>(); }
-	// TODO: String, Object, Array should all be &
-	[[nodiscard]] const std::expected<String, TypeError> string()  const{ return get<String>(); }
-	[[nodiscard]] const std::expected<Object, TypeError> object()  const{ return get<Object>(); }
-	[[nodiscard]] const std::expected<Array, TypeError>  array()   const{ return get<Array>(); }
-	[[nodiscard]] std::expected<String, TypeError>       string(){ return get<String>(); }
-	[[nodiscard]] std::expected<Object, TypeError>       object(){ return get<Object>(); }
-	[[nodiscard]] std::expected<Array, TypeError>        array(){ return get<Array>(); }
+	[[nodiscard]] std::expected<Boolean, TypeError> boolean() const{ return getValue<Boolean>(); }
+	[[nodiscard]] std::expected<Integer, TypeError> integer() const{ return getValue<Integer>(); }
+	[[nodiscard]] std::expected<Decimal, TypeError> decimal() const{ return getValue<Decimal>(); }
+	[[nodiscard]] ExpectedRef<const String, TypeError> string() const&{ return getRef<String>(); }
+	[[nodiscard]] ExpectedRef<const Object, TypeError> object() const&{ return getRef<Object>(); }
+	[[nodiscard]] ExpectedRef<const Array, TypeError>  array()  const&{ return getRef<Array>(); }
+	[[nodiscard]] ExpectedRef<String, TypeError> string() &{ return getRef<String>(); }
+	[[nodiscard]] ExpectedRef<Object, TypeError> object() &{ return getRef<Object>(); }
+	[[nodiscard]] ExpectedRef<Array, TypeError>  array()  &{ return getRef<Array>(); }
+	[[nodiscard]] std::expected<String, TypeError> string() &&{ return getValue<String>(); }
+	[[nodiscard]] std::expected<Object, TypeError> object() &&{ return getValue<Object>(); }
+	[[nodiscard]] std::expected<Array, TypeError>  array()  &&{ return getValue<Array>(); }
 
 	[[nodiscard]] std::expected<Decimal, TypeError> number() const
 	{
 		if(isDecimal())
-			return get<Decimal>().value();
+			return getValue<Decimal>().value();
 
 		if(isInteger())
-			return static_cast<Decimal>(get<Integer>().value());
+			return static_cast<Decimal>(getValue<Integer>().value());
 
 		return std::unexpected(TypeError{});
 	}
@@ -149,8 +150,7 @@ private:
 	VariantType m_variant;
 
 	template<typename T>
-	// TODO: should be T&
-	std::expected<T, TypeError> get()
+	std::expected<T, TypeError> getValue() const&
 	{
 		if(auto* const v = std::get_if<T>(&m_variant))
 			return *v;
@@ -159,10 +159,27 @@ private:
 	}
 
 	template<typename T>
-	// TODO: should be T&
-	const std::expected<T, TypeError> get() const
+	std::expected<T, TypeError> getValue() &&
 	{
 		if(auto* const v = std::get_if<T>(&m_variant))
+			return std::move(*v);
+
+		return std::unexpected(TypeError{});
+	}
+
+	template<typename T>
+	ExpectedRef<T, TypeError> getRef() &
+	{
+		if(auto* const v = std::get_if<T>(&m_variant))
+			return *v;
+
+		return std::unexpected(TypeError{});
+	}
+
+	template<typename T>
+	ExpectedRef<const T, TypeError> getRef() const&
+	{
+		if(const auto* const v = std::get_if<T>(&m_variant))
 			return *v;
 
 		return std::unexpected(TypeError{});

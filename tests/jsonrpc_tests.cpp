@@ -32,9 +32,9 @@ TEST_CASE("jsonrpc parses a request with object params", "[jsonrpc][parse]")
 
 	const auto paramsObject = request.params->object();
 	REQUIRE(paramsObject.has_value());
-	const auto scope = paramsObject->get("scope");
+	const auto scope = paramsObject.value().get("scope");
 	REQUIRE(scope.has_value());
-	CHECK(scope->string().value() == "editor");
+	CHECK(scope.value().string().value() == "editor");
 }
 
 TEST_CASE("jsonrpc parses notifications with null params leniently", "[jsonrpc][parse]")
@@ -169,13 +169,13 @@ TEST_CASE("jsonrpc serializes error response data inside the error object", "[js
 
 	const auto errorValue = jsonMessage.get("error");
 	REQUIRE(errorValue.has_value());
-	REQUIRE(errorValue->isObject());
-	const auto errorObject = errorValue->object();
+	REQUIRE(errorValue.value().isObject());
+	const auto errorObject = errorValue.value().object();
 	REQUIRE(errorObject.has_value());
-	CHECK(errorObject->get("code")->integer().value() == jsonrpc::Error::InvalidParams);
-	CHECK(errorObject->get("message")->string().value() == "bad input");
-	REQUIRE(errorObject->get("data").has_value());
-	CHECK(errorObject->get("data")->string().value() == "details");
+	CHECK(errorObject.value().get("code").value().integer().value() == jsonrpc::Error::InvalidParams);
+	CHECK(errorObject.value().get("message").value().string().value() == "bad input");
+	REQUIRE(errorObject.value().get("data").has_value());
+	CHECK(errorObject.value().get("data").value().string().value() == "details");
 }
 
 TEST_CASE("jsonrpc round-trips message batches", "[jsonrpc][batch][serialize]")

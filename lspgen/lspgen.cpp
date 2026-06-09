@@ -1787,7 +1787,7 @@ private:
 		                                       "}\n\n" +
 		                                       fromJson + "\n"
 		                                       "{\n"
-		                                       "\tauto obj = json.object().value();\n"
+		                                       "\tauto obj = std::move(json).object().value();\n"
 		                                       "\t" + uncapitalizeString(structureCppName) + "FromJson(obj, value);\n"
 		                                       "}\n\n";
 

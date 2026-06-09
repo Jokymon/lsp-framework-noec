@@ -125,6 +125,12 @@ void fromJson(std::expected<json::Value, json::TypeError>&& json, T& value)
 	fromJson(std::move(json.value()), value);
 }
 
+template<typename T>
+void fromJson(ExpectedRef<json::Value, json::TypeError> json, T& value)
+{
+	fromJson(std::move(json.value()), value);
+}
+
 namespace impl{
 
 // Helpers to treat FileURI as a string which can be used to look up values in a json::Object
@@ -231,7 +237,7 @@ bool canDeserializeTypeFromJson(const json::Value& json)
 	{
 		if(json.isArray())
 		{
-			const auto array = json.array().value();
+			const auto& array = json.array().value();
 			return array.empty() || canDeserializeTypeFromJson<typename T::value_type>(array[0]);
 		}
 
@@ -262,7 +268,7 @@ bool canDeserializeTypeFromJson(const json::Value& json)
 	{
 		if(json.isObject())
 		{
-			const auto obj                  = json.object().value();
+			const auto& obj                 = json.object().value();
 			const auto& objMap              = obj.keyValueMap();
 			bool        hasLiteralProperties = true;
 
@@ -474,7 +480,7 @@ json::Value toJson(std::optional<T>&& v)
 template<typename... Args>
 void fromJson(json::Value&& json, std::tuple<Args...>& value)
 {
-	auto array = json.array().value();
+	auto array = std::move(json).array().value();
 
 	if(sizeof...(Args) != array.size())
 		return;
@@ -490,7 +496,7 @@ void fromJson(json::Value&& json, std::tuple<Args...>& value)
 template<typename K, typename T>
 void fromJson(json::Value&& json, StrMap<K, T>& value)
 {
-	auto obj = json.object().value();
+	auto obj = std::move(json).object().value();
 	for(auto&& [k, v] : obj.keyValueMap())
 		fromJson(std::move(v), value[k]);
 }
@@ -498,7 +504,7 @@ void fromJson(json::Value&& json, StrMap<K, T>& value)
 template<typename T>
 void fromJson(json::Value&& json, StrMap<Uri, T>& value)
 {
-	auto obj = json.object().value();
+	auto obj = std::move(json).object().value();
 	value.reserve(obj.size());
 
 	for(auto&& [k, v] : obj.keyValueMap())
@@ -513,7 +519,7 @@ void fromJson(json::Value&& json, StrMap<Uri, T>& value)
 template<typename T>
 void fromJson(json::Value&& json, StrMap<FileUri, T>& value)
 {
-	auto obj = json.object().value();
+	auto obj = std::move(json).object().value();
 	value.reserve(obj.size());
 
 	for(auto&& [k, v] : obj.keyValueMap())
@@ -528,7 +534,7 @@ void fromJson(json::Value&& json, StrMap<FileUri, T>& value)
 template<typename T>
 void fromJson(json::Value&& json, std::vector<T>& value)
 {
-	auto array = json.array().value();
+	auto array = std::move(json).array().value();
 	value.reserve(array.size());
 
 	for(auto&& e : array)

@@ -15,20 +15,20 @@ TEST_CASE("json parse handles nested objects and arrays", "[json][parse]")
 	const auto object = parsed->object();
 	REQUIRE(object.has_value());
 
-	const auto name = object->get("name");
+	const auto name = object.value().get("name");
 	REQUIRE(name.has_value());
-	REQUIRE(name->string().has_value());
-	CHECK(name->string().value() == "lsp");
+	REQUIRE(name.value().string().has_value());
+	CHECK(name.value().string().value() == "lsp");
 
-	const auto enabled = object->get("enabled");
+	const auto enabled = object.value().get("enabled");
 	REQUIRE(enabled.has_value());
-	REQUIRE(enabled->boolean().has_value());
-	CHECK(enabled->boolean().value());
+	REQUIRE(enabled.value().boolean().has_value());
+	CHECK(enabled.value().boolean().value());
 
-	const auto items = object->get("items");
+	const auto items = object.value().get("items");
 	REQUIRE(items.has_value());
-	REQUIRE(items->array().has_value());
-	const auto array = items->array().value();
+	REQUIRE(items.value().array().has_value());
+	const auto& array = items.value().array().value();
 	REQUIRE(array.size() == 3);
 	CHECK(array[0].integer().value() == 1);
 	CHECK(array[1].decimal().value() == 2.5);
