@@ -1,6 +1,10 @@
 add_executable(lsp-tests
 	json_tests.cpp
+	jsonrpc_tests.cpp
 	../lsp/json/json.cpp
+	../lsp/jsonrpc/jsonrpc.cpp
+
+	${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp
 )
 
 target_include_directories(lsp-tests
@@ -10,7 +14,7 @@ target_include_directories(lsp-tests
 
 target_link_libraries(lsp-tests
 	PRIVATE
-		Catch2::Catch2WithMain
+		Catch2::Catch2
 )
 
 include(Catch)

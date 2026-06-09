@@ -192,7 +192,7 @@ json::Object messageToJson(Message&& message)
 			errorJson["message"] = std::move(responseError.message);
 
 			if(responseError.data.has_value())
-				json["data"] = std::move(*responseError.data);
+				errorJson["data"] = std::move(*responseError.data);
 
 			json["error"] = std::move(errorJson);
 		}
