@@ -1,8 +1,10 @@
 add_executable(lsp-tests
 	json_tests.cpp
 	jsonrpc_tests.cpp
+	uri_tests.cpp
 	../lsp/json/json.cpp
 	../lsp/jsonrpc/jsonrpc.cpp
+	../lsp/uri.cpp
 
 	${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp
 )
