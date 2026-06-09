@@ -155,7 +155,7 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: cmake -S . -B build -G Ninja --toolchain cmake/wasm-wasip-clang.cmake -DLSP_HOST_TOOLS_CMAKE_GENERATOR=Ninja -DLSP_HOST_TOOLS_CMAKE_CXX_COMPILER="C:/Program Files/LLVM/bin/clang++.exe"
+        run: cmake -S . -B build -G Ninja --toolchain cmake/wasm-wasip-clang.cmake -DLSP_HOST_TOOLS_CMAKE_GENERATOR=Ninja -DLSP_HOST_TOOLS_CMAKE_CXX_COMPILER=clang-cl.exe
 
       - name: Build
         shell: pwsh

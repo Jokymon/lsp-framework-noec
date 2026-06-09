@@ -54,7 +54,7 @@ The most relevant CMake options are:
 - `LSP_BUILD_HOST_TOOLS`: when cross compiling, build native host-side tools such as `lspgen`; set this to `OFF` to build `lspgen` for the target and execute it through `CMAKE_CROSSCOMPILING_EMULATOR`
 - `LSP_HOST_TOOLS_CMAKE_GENERATOR`: override the generator used for the host-tools sub-build
 - `LSP_HOST_TOOLS_CMAKE_GENERATOR_PLATFORM`: override the generator platform used for the host-tools sub-build
-- `LSP_HOST_TOOLS_CMAKE_CXX_COMPILER`: override the native C++ compiler used for the host-tools sub-build
+- `LSP_HOST_TOOLS_CMAKE_CXX_COMPILER`: override the native C++ compiler used for the host-tools sub-build; this can be an absolute path or just a compiler name available on `PATH`
 
 ### Running Tests
 
@@ -68,7 +68,9 @@ Examples:
 
 - Build a WASM target while keeping `lspgen` native: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake`
 - Build both the target and `lspgen` as WASM and run build-time tools through `wasmtime`: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DLSP_BUILD_HOST_TOOLS=OFF`
-- Build a WASM target but force host tools to use a specific native compiler: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DLSP_HOST_TOOLS_CMAKE_GENERATOR=Ninja -DLSP_HOST_TOOLS_CMAKE_CXX_COMPILER=/path/to/clang++`
+- Build a WASM target but force host tools to use a specific native compiler: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DLSP_HOST_TOOLS_CMAKE_GENERATOR=Ninja -DLSP_HOST_TOOLS_CMAKE_CXX_COMPILER=clang-cl.exe`
+
+On Windows, prefer `clang-cl.exe` over `clang++.exe` for native host tools. `clang-cl` integrates with the MSVC runtime and linker environment more reliably, especially in CI jobs that use `msvc-dev-cmd`.
 
 If you use `lsp` as an external dependency, make sure the cmake config option `LSP_INSTALL` is enabled. Then install the `lsp` target:
 
