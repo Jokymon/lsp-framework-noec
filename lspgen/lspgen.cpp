@@ -1616,7 +1616,7 @@ private:
 			else
 			{
 				if(!isInheritedLiteral)
-					fromJson += "\tfromJson(std::move(json.get(\"" + p.name + "\")), value." + p.name + ");\n";
+					fromJson += "\tfromJson(json.get(\"" + p.name + "\"), value." + p.name + ");\n";
 
 				if(literalValue.empty())
 					requiredProperties.push_back(p.name);
