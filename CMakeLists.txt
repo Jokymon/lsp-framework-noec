@@ -16,7 +16,7 @@ option(LSP_BUILD_TESTS "Build the unit tests" ON)
 option(LSP_BUILD_HOST_TOOLS "Build host-side tools required during cross compilation" ON)
 set(LSP_HOST_TOOLS_CMAKE_GENERATOR "" CACHE STRING "Generator for the host-tools sub-build used during cross compilation")
 set(LSP_HOST_TOOLS_CMAKE_GENERATOR_PLATFORM "" CACHE STRING "Generator platform for the host-tools sub-build used during cross compilation")
-set(LSP_HOST_TOOLS_CMAKE_CXX_COMPILER "" CACHE FILEPATH "Native C++ compiler for the host-tools sub-build used during cross compilation")
+set(LSP_HOST_TOOLS_CMAKE_CXX_COMPILER "" CACHE STRING "Native C++ compiler for the host-tools sub-build used during cross compilation")
 
 set(BUILD_TESTING ${LSP_BUILD_TESTS} CACHE BOOL "Enable CTest-based testing" FORCE)
 
@@ -71,7 +71,7 @@ if(CMAKE_CROSSCOMPILING)
 		set(LSP_HOST_TOOLS_EP_ARGS)
 
 		if(LSP_HOST_TOOLS_CMAKE_CXX_COMPILER)
-			list(APPEND LSP_HOST_TOOLS_CMAKE_ARGS -DCMAKE_CXX_COMPILER:FILEPATH=${LSP_HOST_TOOLS_CMAKE_CXX_COMPILER})
+			list(APPEND LSP_HOST_TOOLS_CMAKE_ARGS -DCMAKE_CXX_COMPILER:STRING=${LSP_HOST_TOOLS_CMAKE_CXX_COMPILER})
 		endif()
 
 		if(LSP_HOST_TOOLS_CMAKE_GENERATOR)
