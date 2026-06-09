@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <exception>
 #include <optional>
 #include <utility>
 
@@ -20,23 +21,35 @@ public:
 
 	[[nodiscard]] T& value() const
 	{
-		assert(m_value);
-		return *m_value;
+		if(m_value)
+			return *m_value;
+
+		badExpectedRefAccess();
 	}
 
 	[[nodiscard]] E& error() &
 	{
-		assert(m_error.has_value());
-		return *m_error;
+		if(m_error.has_value())
+			return *m_error;
+
+		badExpectedRefAccess();
 	}
 
 	[[nodiscard]] const E& error() const&
 	{
-		assert(m_error.has_value());
-		return *m_error;
+		if(m_error.has_value())
+			return *m_error;
+
+		badExpectedRefAccess();
 	}
 
 private:
+	[[noreturn]] static void badExpectedRefAccess()
+	{
+		assert(false && "bad ExpectedRef access");
+		std::terminate();
+	}
+
 	T*               m_value = nullptr;
 	std::optional<E> m_error;
 };
