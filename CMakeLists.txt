@@ -13,6 +13,10 @@ set(CMAKE_CXX_EXTENSIONS NO)
 option(LSP_BUILD_EXAMPLES "Build the examples" OFF)
 option(LSP_INSTALL "Configure lsp install configuration" ON)
 option(LSP_BUILD_TESTS "Build the unit tests" ON)
+option(LSP_BUILD_HOST_TOOLS "Build host-side tools required during cross compilation" ON)
+set(LSP_HOST_TOOLS_CMAKE_GENERATOR "" CACHE STRING "Generator for the host-tools sub-build used during cross compilation")
+set(LSP_HOST_TOOLS_CMAKE_GENERATOR_PLATFORM "" CACHE STRING "Generator platform for the host-tools sub-build used during cross compilation")
+set(LSP_HOST_TOOLS_CMAKE_CXX_COMPILER "" CACHE FILEPATH "Native C++ compiler for the host-tools sub-build used during cross compilation")
 
 set(BUILD_TESTING ${LSP_BUILD_TESTS} CACHE BOOL "Enable CTest-based testing" FORCE)
 
@@ -55,8 +59,91 @@ endif()
 
 # lspgen
 
-add_executable(lspgen lspgen/lspgen.cpp lsp/json/json.cpp)
-target_include_directories(lspgen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(CMAKE_CROSSCOMPILING)
+	if(LSP_BUILD_HOST_TOOLS)
+		include(ExternalProject)
+
+		set(LSP_HOST_TOOLS_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/host-tools)
+		set(LSP_HOST_TOOLS_CMAKE_ARGS
+			-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+			-DLSP_ROOT_DIR:PATH=${CMAKE_CURRENT_SOURCE_DIR}
+		)
+		set(LSP_HOST_TOOLS_EP_ARGS)
+
+		if(LSP_HOST_TOOLS_CMAKE_CXX_COMPILER)
+			list(APPEND LSP_HOST_TOOLS_CMAKE_ARGS -DCMAKE_CXX_COMPILER:FILEPATH=${LSP_HOST_TOOLS_CMAKE_CXX_COMPILER})
+		endif()
+
+		if(LSP_HOST_TOOLS_CMAKE_GENERATOR)
+			list(APPEND LSP_HOST_TOOLS_EP_ARGS CMAKE_GENERATOR ${LSP_HOST_TOOLS_CMAKE_GENERATOR})
+		elseif(CMAKE_HOST_WIN32)
+			set(LSP_HOST_EXECUTABLE_SUFFIX .exe)
+
+			execute_process(
+				COMMAND ${CMAKE_COMMAND} -E capabilities
+				OUTPUT_VARIABLE LSP_CMAKE_CAPABILITIES_JSON
+			)
+			foreach(LSP_HOST_TOOLS_GENERATOR_CANDIDATE
+				"Visual Studio 18 2026"
+				"Visual Studio 17 2022"
+				"Visual Studio 16 2019"
+				"Visual Studio 15 2017"
+			)
+				if(LSP_CMAKE_CAPABILITIES_JSON MATCHES "\"name\"[^\r\n]*\"${LSP_HOST_TOOLS_GENERATOR_CANDIDATE}\"")
+					set(LSP_HOST_TOOLS_GENERATOR ${LSP_HOST_TOOLS_GENERATOR_CANDIDATE})
+					break()
+				endif()
+			endforeach()
+
+			if(NOT LSP_HOST_TOOLS_GENERATOR)
+				message(FATAL_ERROR "Could not detect a supported Visual Studio generator for building host-side tools.")
+			endif()
+
+			list(APPEND LSP_HOST_TOOLS_EP_ARGS CMAKE_GENERATOR ${LSP_HOST_TOOLS_GENERATOR})
+		endif()
+
+		if(NOT CMAKE_HOST_WIN32)
+			set(LSP_HOST_EXECUTABLE_SUFFIX)
+		elseif(NOT DEFINED LSP_HOST_EXECUTABLE_SUFFIX)
+			set(LSP_HOST_EXECUTABLE_SUFFIX .exe)
+		endif()
+
+		if(LSP_HOST_TOOLS_CMAKE_GENERATOR_PLATFORM)
+			list(APPEND LSP_HOST_TOOLS_EP_ARGS CMAKE_GENERATOR_PLATFORM ${LSP_HOST_TOOLS_CMAKE_GENERATOR_PLATFORM})
+		elseif(CMAKE_HOST_WIN32 AND NOT LSP_HOST_TOOLS_CMAKE_GENERATOR)
+			list(APPEND LSP_HOST_TOOLS_EP_ARGS CMAKE_GENERATOR_PLATFORM x64)
+		elseif(CMAKE_HOST_WIN32 AND LSP_HOST_TOOLS_CMAKE_GENERATOR MATCHES "^Visual Studio ")
+			list(APPEND LSP_HOST_TOOLS_EP_ARGS CMAKE_GENERATOR_PLATFORM x64)
+		endif()
+
+		set(LSPGEN_EXECUTABLE ${LSP_HOST_TOOLS_BINARY_DIR}/lspgen-host${LSP_HOST_EXECUTABLE_SUFFIX})
+		set(LSPGEN_DEPENDENCY lsp_host_tools)
+
+		ExternalProject_Add(lsp_host_tools
+			SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake/host-tools
+			BINARY_DIR ${LSP_HOST_TOOLS_BINARY_DIR}
+			CMAKE_ARGS ${LSP_HOST_TOOLS_CMAKE_ARGS}
+			${LSP_HOST_TOOLS_EP_ARGS}
+			INSTALL_COMMAND ""
+			BUILD_BYPRODUCTS ${LSPGEN_EXECUTABLE}
+		)
+	else()
+		if(NOT CMAKE_CROSSCOMPILING_EMULATOR)
+			message(FATAL_ERROR "Cross compilation with LSP_BUILD_HOST_TOOLS=OFF requires CMAKE_CROSSCOMPILING_EMULATOR so lspgen can run during the build.")
+		endif()
+
+		add_executable(lspgen lspgen/lspgen.cpp lsp/json/json.cpp)
+		target_include_directories(lspgen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+		set(LSPGEN_DEPENDENCY lspgen)
+	endif()
+else()
+	add_executable(lspgen lspgen/lspgen.cpp lsp/json/json.cpp)
+	target_include_directories(lspgen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+	set(LSPGEN_EXECUTABLE $<TARGET_FILE:lspgen>)
+	set(LSPGEN_DEPENDENCY lspgen)
+endif()
 
 # liblsp
 
@@ -125,12 +212,25 @@ set(LSP_GENERATED_SOURCES
 set(LSP_METAMODEL_JSON ${CMAKE_CURRENT_SOURCE_DIR}/lspgen/metaModel.json)
 set(LSP_METAMODEL_JSON_GUEST /workspace/lspgen/metaModel.json)
 
+if(CMAKE_CROSSCOMPILING AND NOT LSP_BUILD_HOST_TOOLS)
+	set(LSPGEN_COMMAND
+		${CMAKE_CROSSCOMPILING_EMULATOR}
+		--dir ${LSP_GENERATED_LSP_DIR}::.
+		--dir ${CMAKE_CURRENT_SOURCE_DIR}::/workspace
+		$<TARGET_FILE:lspgen>
+		${LSP_METAMODEL_JSON_GUEST}
+	)
+else()
+	set(LSPGEN_COMMAND ${LSPGEN_EXECUTABLE} ${LSP_METAMODEL_JSON})
+endif()
+
 add_custom_command(
-	COMMAND wasmtime run --dir ${LSP_GENERATED_LSP_DIR}::. --dir ${CMAKE_CURRENT_SOURCE_DIR}::/workspace ${CMAKE_CURRENT_BINARY_DIR}/lspgen.wasm ${LSP_METAMODEL_JSON_GUEST}
+	COMMAND ${LSPGEN_COMMAND}
 	WORKING_DIRECTORY ${LSP_GENERATED_LSP_DIR}
 	OUTPUT ${LSP_GENERATED_HEADERS} ${LSP_GENERATED_SOURCES}
-	DEPENDS lspgen ${LSP_METAMODEL_JSON}
+	DEPENDS ${LSPGEN_DEPENDENCY} ${LSP_METAMODEL_JSON}
 	COMMENT "Generating lsp types from meta model..."
+	VERBATIM
 )
 
 add_library(lsp

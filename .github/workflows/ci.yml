@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  linux-native:
+    name: Linux Native
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
+
+  windows-native-msvc:
+    name: Windows Native MSVC
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja --no-progress -y
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G Ninja
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --parallel
+
+      - name: Run unit tests
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
+  windows-wasm-target-tools:
+    name: Windows WASM Target Tools
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja --no-progress -y
+
+      - name: Install WASI SDK and sysroot
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\sw | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP "wasi-sdk-29.0-x86_64-windows.tar.gz"
+          Invoke-WebRequest -Uri "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-windows.tar.gz" -OutFile $archive
+          tar -xzf $archive -C C:\sw
+          Copy-Item -Path "C:\sw\wasi-sdk-29.0-x86_64-windows\share\wasi-sysroot" -Destination "C:\sw\wasi-sysroot-29.0" -Recurse -Force
+
+      - name: Install Wasmtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\sw\bin | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP "wasmtime-v41.0.0-x86_64-windows.zip"
+          Invoke-WebRequest -Uri "https://github.com/bytecodealliance/wasmtime/releases/download/v41.0.0/wasmtime-v41.0.0-x86_64-windows.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $env:RUNNER_TEMP -Force
+          Copy-Item -Path (Join-Path $env:RUNNER_TEMP "wasmtime-v41.0.0-x86_64-windows\wasmtime.exe") -Destination "C:\sw\bin\wasmtime.exe" -Force
+
+      - name: Add tool paths
+        shell: pwsh
+        run: |
+          "C:\sw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\sw\wasi-sdk-29.0-x86_64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G Ninja --toolchain cmake/wasm-wasip-clang.cmake -DLSP_BUILD_HOST_TOOLS=OFF
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --parallel
+
+      - name: Run unit tests
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
+  windows-wasm-host-tools-clang:
+    name: Windows WASM Host Tools Clang
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja --no-progress -y
+
+      - name: Install LLVM
+        shell: pwsh
+        run: choco install llvm --no-progress -y
+
+      - name: Install WASI SDK and sysroot
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\sw | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP "wasi-sdk-29.0-x86_64-windows.tar.gz"
+          Invoke-WebRequest -Uri "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-windows.tar.gz" -OutFile $archive
+          tar -xzf $archive -C C:\sw
+          Copy-Item -Path "C:\sw\wasi-sdk-29.0-x86_64-windows\share\wasi-sysroot" -Destination "C:\sw\wasi-sysroot-29.0" -Recurse -Force
+
+      - name: Install Wasmtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\sw\bin | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP "wasmtime-v41.0.0-x86_64-windows.zip"
+          Invoke-WebRequest -Uri "https://github.com/bytecodealliance/wasmtime/releases/download/v41.0.0/wasmtime-v41.0.0-x86_64-windows.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $env:RUNNER_TEMP -Force
+          Copy-Item -Path (Join-Path $env:RUNNER_TEMP "wasmtime-v41.0.0-x86_64-windows\wasmtime.exe") -Destination "C:\sw\bin\wasmtime.exe" -Force
+
+      - name: Add tool paths
+        shell: pwsh
+        run: |
+          "C:\sw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\sw\wasi-sdk-29.0-x86_64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G Ninja --toolchain cmake/wasm-wasip-clang.cmake -DLSP_HOST_TOOLS_CMAKE_GENERATOR=Ninja -DLSP_HOST_TOOLS_CMAKE_CXX_COMPILER="C:/Program Files/LLVM/bin/clang++.exe"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --parallel
+
+      - name: Run unit tests
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure

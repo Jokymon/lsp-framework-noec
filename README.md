@@ -15,7 +15,60 @@ There aren't any external dependencies except for `cmake` and a compiler that su
 
 The project is built as a static library. LSP type definitions, messages and serialization boilerplate are generated from the official [meta model](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/lsp/3.17/metaModel/metaModel.json) during the build.
 
+### Native Build
+
+For a normal native build, configure and build the project directly:
+
 `cmake -S . -B build && cmake --build build --parallel`
+
+This builds the `lsp` library, the optional examples/tests, and also builds and runs `lspgen` as a native host executable during the build.
+
+### WASM Cross Build
+
+For WASM builds, use the repository toolchain file [wasm-wasip-clang.cmake](./cmake/wasm-wasip-clang.cmake):
+
+`cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake && cmake --build build --parallel`
+
+In cross builds, the project now splits build-time tools from target artifacts:
+
+- `lspgen` is built as a native host tool in a separate CMake sub-build
+- the library, examples, and tests are built for the selected target toolchain
+
+This avoids requiring a WASM runtime just to generate source files during the build.
+
+If you want to run WASM test executables through `ctest`, make sure `wasmtime` is on `PATH` before configuring. On this repository's Windows setup you can use [env.ps1](./env.ps1):
+
+`./env.ps1`
+
+The WASM toolchain will automatically set `CMAKE_CROSSCOMPILING_EMULATOR` to `wasmtime run` when `wasmtime` is discoverable. If needed, you can also set it explicitly during configure:
+
+`cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DCMAKE_CROSSCOMPILING_EMULATOR="C:/path/to/wasmtime.exe;run"`
+
+### Build Options
+
+The most relevant CMake options are:
+
+- `LSP_BUILD_EXAMPLES`: build the example client/server executables
+- `LSP_BUILD_TESTS`: build the Catch2 unit tests
+- `LSP_INSTALL`: generate install/export rules
+- `LSP_BUILD_HOST_TOOLS`: when cross compiling, build native host-side tools such as `lspgen`; set this to `OFF` to build `lspgen` for the target and execute it through `CMAKE_CROSSCOMPILING_EMULATOR`
+- `LSP_HOST_TOOLS_CMAKE_GENERATOR`: override the generator used for the host-tools sub-build
+- `LSP_HOST_TOOLS_CMAKE_GENERATOR_PLATFORM`: override the generator platform used for the host-tools sub-build
+- `LSP_HOST_TOOLS_CMAKE_CXX_COMPILER`: override the native C++ compiler used for the host-tools sub-build
+
+### Running Tests
+
+Native builds can run tests with:
+
+`ctest --test-dir build --output-on-failure`
+
+WASM builds can also use `ctest` when `CMAKE_CROSSCOMPILING_EMULATOR` is configured. Otherwise you can run the generated test executable manually with `wasmtime run`.
+
+Examples:
+
+- Build a WASM target while keeping `lspgen` native: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake`
+- Build both the target and `lspgen` as WASM and run build-time tools through `wasmtime`: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DLSP_BUILD_HOST_TOOLS=OFF`
+- Build a WASM target but force host tools to use a specific native compiler: `cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm-wasip-clang.cmake -DLSP_HOST_TOOLS_CMAKE_GENERATOR=Ninja -DLSP_HOST_TOOLS_CMAKE_CXX_COMPILER=/path/to/clang++`
 
 If you use `lsp` as an external dependency, make sure the cmake config option `LSP_INSTALL` is enabled. Then install the `lsp` target:
 
