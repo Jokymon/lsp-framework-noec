@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.12)
 
 project(lsp)
 
+include(CTest)
+
 # compiler flags
 
 set(CMAKE_CXX_STANDARD 23)
@@ -10,6 +12,9 @@ set(CMAKE_CXX_EXTENSIONS NO)
 
 option(LSP_BUILD_EXAMPLES "Build the examples" OFF)
 option(LSP_INSTALL "Configure lsp install configuration" ON)
+option(LSP_BUILD_TESTS "Build the unit tests" ON)
+
+set(BUILD_TESTING ${LSP_BUILD_TESTS} CACHE BOOL "Enable CTest-based testing" FORCE)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 	add_compile_options(/W4 /bigobj)
@@ -203,4 +208,20 @@ if(LSP_BUILD_EXAMPLES)
 	# Client
 	add_executable(LspClientExample ${LSP_DIR}/examples/client.cpp)
 	target_link_libraries(LspClientExample lsp)
+endif()
+
+if(LSP_BUILD_TESTS)
+	include(FetchContent)
+
+	set(CATCH_CONFIG_NO_POSIX_SIGNALS ON CACHE BOOL "Disable POSIX signal handling in Catch2" FORCE)
+	set(CATCH_CONFIG_NO_WINDOWS_SEH ON CACHE BOOL "Disable Windows SEH handling in Catch2" FORCE)
+
+	FetchContent_Declare(
+		Catch2
+		GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+		GIT_TAG v3.7.1
+	)
+	FetchContent_MakeAvailable(Catch2)
+
+	add_subdirectory(tests)
 endif()
