@@ -283,8 +283,8 @@ struct ArrayType : Type{
 
 	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		// TODO: check unexpected and should be const auto&
-		const auto elementTypeJson = json.get(strings::element).value().object().value();
+		// TODO: check unexpected
+		const auto& elementTypeJson = json.get(strings::element).value().object().value();
 		elementType = createFromJson(elementTypeJson).value();
 		return std::expected<void, std::runtime_error>{};
 	}
@@ -310,8 +310,8 @@ struct AndType : Type{
 
 	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		// TODO: handle unexpected and should be const auto&
-		const auto items = json.get(strings::items).value().array().value();
+		// TODO: handle unexpected
+		const auto& items = json.get(strings::items).value().array().value();
 		typeList.reserve(items.size());
 
 		for(const auto& i : items)
@@ -336,8 +336,8 @@ struct TupleType : Type{
 
 	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		// TODO: handle unexpected and should be const auto&
-		const auto items = json.get(strings::items).value().array().value();
+		// TODO: handle unexpected
+		const auto& items = json.get(strings::items).value().array().value();
 		typeList.reserve(items.size());
 
 		for(const auto& i : items)
@@ -396,8 +396,8 @@ struct StructureLiteralType : Type{
 
 	std::expected<void, std::runtime_error> extract(const json::Object& json) override
 	{
-		// TODO: handle unexpected and should be const auto&
-		const auto value = json.get(strings::value).value().object().value();
+		// TODO: handle unexpected
+		const auto& value = json.get(strings::value).value().object().value();
 		properties = extractStructureProperties(value.get(strings::properties).value().array().value());
 		return std::expected<void, std::runtime_error>{};
 	}
@@ -407,8 +407,8 @@ struct StructureLiteralType : Type{
 
 std::expected<void, std::runtime_error> OrType::extract(const json::Object& json)
 {
-	// TODO handle unexpected and should be const auto&
-	const auto items = json.get(strings::items).value().array().value();
+	// TODO handle unexpected
+	const auto& items = json.get(strings::items).value().array().value();
 	typeList.reserve(items.size());
 
 	std::vector<std::unique_ptr<Type>> structureLiterals;
@@ -571,17 +571,17 @@ struct Enumeration{
 	void extract(const json::Object& json)
 	{
 		name = json.get(strings::name).value().string().value();
-		// TODO: handle unexpected and should be const auto&
-		const auto typeJson = json.get(strings::type).value().object().value();
+		// TODO: handle unexpected
+		const auto& typeJson = json.get(strings::type).value().object().value();
 		type = Type::createFromJson(typeJson).value();
-		// TODO: handle unexpected and should be const auto&
-		const auto valuesJson = json.get(strings::values).value().array().value();
+		// TODO: handle unexpected
+		const auto& valuesJson = json.get(strings::values).value().array().value();
 		values.reserve(valuesJson.size());
 
 		for(const auto& v : valuesJson)
 		{
 			// TODO: handle unexpected
-			const auto obj = v.object().value();
+			const auto& obj = v.object().value();
 			auto& enumValue = values.emplace_back();
 			enumValue.name = obj.get(strings::name).value().string().value();
 			enumValue.value = obj.get(strings::value).value();
@@ -611,8 +611,8 @@ struct Structure{
 
 		if(json.contains(strings::extends))
 		{
-			// TODO: handle unexpected and should be const auto&
-			const auto extendsJson = json.get(strings::extends).value().array().value();
+			// TODO: handle unexpected
+			const auto& extendsJson = json.get(strings::extends).value().array().value();
 			extends.reserve(extendsJson.size());
 
 			for(const auto& e : extendsJson)
@@ -621,8 +621,8 @@ struct Structure{
 
 		if(json.contains(strings::mixins))
 		{
-			// TODO: handle unexpected and should be const auto&
-			const auto mixinsJson = json.get(strings::mixins).value().array().value();
+			// TODO: handle unexpected
+			const auto& mixinsJson = json.get(strings::mixins).value().array().value();
 			mixins.reserve(mixinsJson.size());
 
 			for(const auto& e : mixinsJson)
@@ -667,8 +667,8 @@ struct Message{
 		if(!json.contains(key))
 			return {};
 
-		// TODO: handle unexpected and should be const auto&
-		const auto type = json.get(key).value().object().value();
+		// TODO: handle unexpected
+		const auto& type = json.get(key).value().object().value();
 
 		if(type.get(strings::kind).value().string().value() == "reference")
 			return type.get(strings::name).value().string().value();
@@ -679,8 +679,8 @@ struct Message{
 	std::expected<void, std::runtime_error> extract(const json::Object& json)
 	{
 		documentation = extractDocumentation(json);
-		// TODO: check unexpected and should be const auto&
-		const auto dir = json.get(strings::messageDirection).value().string().value();
+		// TODO: check unexpected
+		const auto& dir = json.get(strings::messageDirection).value().string().value();
 
 		if(dir == strings::clientToServer)
 			direction = Direction::ClientToServer;
@@ -778,8 +778,8 @@ private:
 
 	void extractMetaData(const json::Object& json)
 	{
-		// TODO: should be const auto& and twice handle unexpected
-		const auto metaDataJson = json.get("metaData").value().object().value();
+		// TODO: twice handle unexpected
+		const auto& metaDataJson = json.get("metaData").value().object().value();
 		m_metaData.version = metaDataJson.get("version").value().string().value();
 	}
 
@@ -798,14 +798,14 @@ private:
 
 	std::expected<void, std::runtime_error> extractRequests(const json::Object& json)
 	{
-		// TODO: check unhandled and should be const auto&
-		const auto requests = json.get("requests").value().array().value();
+		// TODO: check unhandled
+		const auto& requests = json.get("requests").value().array().value();
 
 		for(const auto& r : requests)
 		{
-			// TODO: twice check unhandled and should be const auto&
-			const auto obj = r.object().value();
-			const auto method = obj.get(strings::method).value().string().value();
+			// TODO: twice check unhandled
+			const auto& obj = r.object().value();
+			const auto& method = obj.get(strings::method).value().string().value();
 
 			if(m_requestsByMethod.contains(method))
 				return std::unexpected(std::runtime_error{"Duplicate request method: " + method});
@@ -818,14 +818,14 @@ private:
 
 	std::expected<void, std::runtime_error> extractNotifications(const json::Object& json)
 	{
-		// TODO: should be const auto& and check unexpected
-		const auto notifications = json.get("notifications").value().array().value();
+		// TODO: check unexpected
+		const auto& notifications = json.get("notifications").value().array().value();
 
 		for(const auto& r : notifications)
 		{
-			// TODO: twice handle unexpected and should be const auto&
-			const auto obj = r.object().value();
-			const auto method = obj.get(strings::method).value().string().value();
+			// TODO: twice handle unexpected
+			const auto& obj = r.object().value();
+			const auto& method = obj.get(strings::method).value().string().value();
 
 			if(m_notificationsByMethod.contains(method))
 				return std::unexpected(std::runtime_error{"Duplicate request method: " + method});
@@ -849,8 +849,8 @@ private:
 
 	void extractEnumerations(const json::Object& json)
 	{
-		// TODO: check unexpected and should be const auto&
-		const auto enumerations = json.get("enumerations").value().array().value();
+		// TODO: check unexpected
+		const auto& enumerations = json.get("enumerations").value().array().value();
 
 		m_enumerations.resize(enumerations.size());
 
@@ -863,8 +863,8 @@ private:
 
 	void extractStructures(const json::Object& json)
 	{
-		// TODO: check unexpected and should be const auto&
-		const auto structures = json.get("structures").value().array().value();
+		// TODO: check unexpected
+		const auto& structures = json.get("structures").value().array().value();
 
 		m_structures.resize(structures.size());
 
@@ -879,8 +879,8 @@ private:
 	{
 		if(json.contains(key))
 		{
-			// TODO: handle unexpected and should be const auto&
-			const auto typeJson = json.get(key).value().object().value();
+			// TODO: handle unexpected
+			const auto& typeJson = json.get(key).value().object().value();
 
 			if(typeJson.get(strings::kind).value().string().value() != "reference")
 			{
@@ -895,8 +895,8 @@ private:
 
 	void extractTypeAliases(const json::Object& json)
 	{
-		// TODO: handle unexpected and should be const auto&
-		const auto typeAliases = json.get("typeAliases").value().array().value();
+		// TODO: handle unexpected
+		const auto& typeAliases = json.get("typeAliases").value().array().value();
 
 		m_typeAliases.resize(typeAliases.size());
 
@@ -908,12 +908,12 @@ private:
 
 		// Extract message and notification parameter and result types
 
-		// TODO: handle unexpected and should be const auto&
-		const auto requests = json.get("requests").value().array().value();
+		// TODO: handle unexpected
+		const auto& requests = json.get("requests").value().array().value();
 
 		for(const auto& r : requests)
 		{
-			const auto obj = r.object().value();
+			const auto& obj = r.object().value();
 			const auto typeBaseName = obj.get(strings::method).value().string().value();
 
 			addTypeAlias(obj, strings::result, typeBaseName);
@@ -923,13 +923,13 @@ private:
 			addTypeAlias(obj, strings::registrationOptions, typeBaseName);
 		}
 
-		// TODO: handle unexpected and should be const auto&
-		const auto notifications = json.get("notifications").value().array().value();
+		// TODO: handle unexpected
+		const auto& notifications = json.get("notifications").value().array().value();
 
 		for(const auto& n : notifications)
 		{
-			// TODO: handle unexpected and should be const auto&
-			const auto obj = n.object().value();
+			// TODO: handle unexpected
+			const auto& obj = n.object().value();
 			const auto typeBaseName = obj.get(strings::method).value().string().value();
 			addTypeAlias(obj, strings::params, typeBaseName);
 			addTypeAlias(obj, strings::registrationOptions, typeBaseName);
